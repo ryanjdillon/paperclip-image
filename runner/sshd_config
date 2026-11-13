@@ -1,0 +1,45 @@
+# sshd runs unprivileged, as the only user it can authenticate. Keys only.
+Port 2222
+ListenAddress 0.0.0.0
+HostKey /tmp/sshd/ssh_host_ed25519_key
+PidFile /tmp/sshd/sshd.pid
+# StrictModes checks every directory on the way, so this cannot live under
+# /tmp; the entrypoint makes $HOME and ~/.ssh private.
+AuthorizedKeysFile .ssh/authorized_keys
+AllowUsers node
+
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+PermitEmptyPasswords no
+UsePAM no
+DebianBanner no
+# One key, BatchMode, one session per connection (the driver never
+# multiplexes).
+MaxAuthTries 2
+MaxSessions 1
+LoginGraceTime 15
+# The callback bridge polls its file queue with a short SSH exec about every
+# 100 ms per active run, so keep the unauthenticated-connection limit well
+# above the default.
+MaxStartups 30:30:100
+
+# Runs exec commands only: no forwarding of any kind, no TTY (the driver
+# never asks for one), no sftp subsystem. Egress NetworkPolicy, not these, is
+# what stops an agent relaying traffic itself.
+DisableForwarding yes
+PermitTunnel no
+PermitTTY no
+PermitUserEnvironment no
+
+# The ssh client answers these itself, so a quiet agent never trips them;
+# they only reap sessions whose client (the server pod) has gone.
+ClientAliveInterval 30
+ClientAliveCountMax 4
+
+# INFO logs each bridge poll (about three lines per connection); filter the
+# Accepted/Disconnected lines at the log shipper rather than lose failed
+# logins.
+LogLevel INFO

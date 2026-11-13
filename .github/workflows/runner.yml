@@ -1,0 +1,35 @@
+name: runner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - runner/**
+      - .github/workflows/runner.yml
+  pull_request:
+    paths:
+      - runner/**
+      - .github/workflows/runner.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    # The called job declares packages: write and cannot exceed this grant,
+    # even when it only builds; registry login is skipped unless pushing.
+    permissions:
+      contents: read
+      packages: write
+    uses: ryanjdillon/workflows/.github/workflows/docker-build-push.yml@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
+    with:
+      image: ryanjdillon/paperclip-agent-runner
+      context: runner
+      platforms: linux/amd64
+      # Only main publishes; pull requests and other branches only build.
+      push: ${{ github.ref == 'refs/heads/main' }}
