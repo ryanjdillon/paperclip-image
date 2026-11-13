@@ -8,7 +8,8 @@
 # config, extensions and skills (~/.pi, ~/.agents), git's user config, and
 # ~/.ssh. Neither CLI keeps sessions there over SSH: Paperclip passes them
 # per run. Paths are removed with rm -rf, so a planted
-# directory or symlink cannot stop the runner from starting.
+# directory or symlink cannot stop the runner from starting. pi's providers
+# (~/.pi/agent/models.json) are then re-seeded from the deployment's mount.
 set -eu
 
 keys=${KEYS_DIR:-/keys}
@@ -69,10 +70,13 @@ fi
 # gateway provider must be in pi's own config dir, because Paperclip's
 # environment test (and the agent verification built on it) runs pi without
 # the per-run config that PAPERCLIP_PI_PROVIDERS produces.
+# PI_MODELS_FILE overrides the path (local tests).
 pi_models=${PI_MODELS_FILE:-/etc/paperclip-runner/pi/models.json}
 if [ -r "$pi_models" ]; then
   mkdir -p -m 700 "$HOME/.pi" "$HOME/.pi/agent"
   install -m 600 "$pi_models" "$HOME/.pi/agent/models.json"
+else
+  echo "entrypoint: no pi models at $pi_models; pi knows only its built-in providers" >&2
 fi
 
 mkdir -m 700 "$HOME/.ssh"
