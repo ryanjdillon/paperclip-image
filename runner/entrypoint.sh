@@ -65,6 +65,16 @@ if [ -f "$HOME/.claude.json" ]; then
   ' "$HOME/.claude.json"
 fi
 
+# pi's providers (models.json), when the deployment mounts them: the custom
+# gateway provider must be in pi's own config dir, because Paperclip's
+# environment test (and the agent verification built on it) runs pi without
+# the per-run config that PAPERCLIP_PI_PROVIDERS produces.
+pi_models=${PI_MODELS_FILE:-/etc/paperclip-runner/pi/models.json}
+if [ -r "$pi_models" ]; then
+  mkdir -p -m 700 "$HOME/.pi" "$HOME/.pi/agent"
+  install -m 600 "$pi_models" "$HOME/.pi/agent/models.json"
+fi
+
 mkdir -m 700 "$HOME/.ssh"
 install -m 600 "$keys/authorized_keys" "$HOME/.ssh/authorized_keys"
 mkdir -p /tmp/sshd

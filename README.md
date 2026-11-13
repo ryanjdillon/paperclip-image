@@ -39,6 +39,10 @@ path to the server.
 - Claude Code's managed settings (`/etc/claude-code/managed-settings.json`)
   allow only managed hooks (none are defined), and turn off the self-updater
   and non-essential traffic. Agents cannot override those settings.
+- pi providers: a `models.json` mounted at
+  `/etc/paperclip-runner/pi/models.json` is copied to `~/.pi/agent/` on start
+  (after the reset), so pi knows custom providers, e.g. the AI gateway, even
+  where Paperclip runs it without per-run config (its environment test).
 - Agent CLIs: Claude Code and pi (`pi_local`, run offline: no version
   checks, telemetry or tool downloads).
 - The base image is pinned by digest and the CLIs by version. Renovate bumps
