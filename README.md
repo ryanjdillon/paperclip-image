@@ -37,18 +37,27 @@ path to the server.
   the environment's known hosts and turn on strict host key checking.
   Otherwise the driver accepts any host key.
 - Claude Code's managed settings (`/etc/claude-code/managed-settings.json`)
-  turn off its self-updater and non-essential traffic. Agents cannot override
-  them.
+  allow only managed hooks (none are defined), and turn off the self-updater
+  and non-essential traffic. Agents cannot override those settings.
 - The base image is pinned by digest and Claude Code by version; Renovate
   bumps both.
 
 ### Limits
 
 Runs on one runner share a UID and a persistent home. One run can read
-another's environment through `/proc` while both are live, and can leave
-files (`~/.profile`, `~/.claude/settings.json`, even `~/.ssh/authorized_keys`
-until the next restart) that later runs pick up. Run one runner per trust
-level, and allow port 2222 only from the Paperclip server.
+another's environment through `/proc` while both are live, and **between
+restarts anything one run leaves in the home applies to every later run**:
+shell startup files, Claude Code settings and extensions, git config, files
+and git hooks in reused workspaces, and other agents' session transcripts.
+
+On start the entrypoint removes the shell startup files, Claude Code's user
+settings, memory and extensions, its user-scope MCP servers, git's user
+config and `~/.npmrc`, and rebuilds `~/.ssh`; sshd never runs `~/.ssh/rc`.
+Workspaces and session transcripts (`~/.claude/projects`, needed to resume)
+are kept. The host private key is readable by runs too (same UID).
+
+Run one runner per trust level, and allow port 2222 only from the Paperclip
+server.
 
 When the server's SSH client dies mid-run, the agent gets no hang-up signal
 (there is no TTY); it runs until its next write fails, and tini reaps it.

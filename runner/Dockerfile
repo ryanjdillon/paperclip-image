@@ -32,9 +32,9 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && claude --version \
  && rm -rf /root/.claude /root/.claude.json
 
-# Claude Code reads managed settings before user or project ones, and agents
-# cannot override them: no self-update (it would install into the writable
-# home and defeat the pin), no non-essential traffic.
+# Claude Code's managed settings take precedence over user and project ones:
+# only managed hooks run (none are defined), no self-update (it would install
+# into the writable home and defeat the pin), no non-essential traffic.
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 COPY profile.sh /etc/profile.d/paperclip-runner.sh
 
