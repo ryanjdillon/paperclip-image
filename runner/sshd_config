@@ -32,7 +32,7 @@ MaxStartups 30:30:100
 DisableForwarding yes
 PermitTunnel no
 PermitTTY no
-PermitUserEnvironment no
+PermitUserEnvironment no  # so ~/.ssh/environment is ignored too
 # Never run ~/.ssh/rc: the home is writable by every run.
 PermitUserRC no
 
