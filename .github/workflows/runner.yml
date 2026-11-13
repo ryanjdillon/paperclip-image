@@ -1,0 +1,29 @@
+name: runner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - runner/**
+      - .github/workflows/runner.yml
+  pull_request:
+    paths:
+      - runner/**
+      - .github/workflows/runner.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    permissions:
+      contents: read
+      packages: write
+    uses: ryanjdillon/workflows/.github/workflows/docker-build-push.yml@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
+    with:
+      image: ryanjdillon/paperclip-agent-runner
+      context: runner
+      platforms: linux/amd64
+      # Pull requests only check that the image builds.
+      push: ${{ github.event_name != 'pull_request' }}
