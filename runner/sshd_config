@@ -33,6 +33,8 @@ DisableForwarding yes
 PermitTunnel no
 PermitTTY no
 PermitUserEnvironment no
+# Never run ~/.ssh/rc: the home is writable by every run.
+PermitUserRC no
 
 # The ssh client answers these itself, so a quiet agent never trips them;
 # they only reap sessions whose client (the server pod) has gone.

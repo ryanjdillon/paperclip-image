@@ -20,5 +20,10 @@ mkdir -p "$HOME/.ssh" "$HOME/workspaces"
 chmod 700 "$HOME/.ssh"
 install -m 600 "$keys/authorized_keys" "$HOME/.ssh/authorized_keys"
 
+# Paperclip's driver sources these before every command, and the home
+# persists: remove whatever a previous run left, so a restart starts clean.
+rm -f "$HOME/.profile" "$HOME/.bashrc" "$HOME/.bash_profile" \
+  "$HOME/.zprofile" "$HOME/.ssh/rc" "$HOME/.ssh/environment"
+
 /usr/sbin/sshd -t -f /etc/ssh/sshd_config
 exec /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config

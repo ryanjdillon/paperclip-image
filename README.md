@@ -46,9 +46,11 @@ path to the server.
 
 Runs on one runner share a UID and a persistent home. One run can read
 another's environment through `/proc` while both are live, and can leave
-files (`~/.profile`, `~/.claude/settings.json`, even `~/.ssh/authorized_keys`
-until the next restart) that later runs pick up. Run one runner per trust
-level, and allow port 2222 only from the Paperclip server.
+files (`~/.profile`, `~/.claude/settings.json`, even `~/.ssh/authorized_keys`)
+that later runs pick up until the next restart; the entrypoint then removes
+the shell startup files and rewrites `authorized_keys`, and sshd never runs
+`~/.ssh/rc`. The host private key is readable by runs too (same UID). Run one
+runner per trust level, and allow port 2222 only from the Paperclip server.
 
 When the server's SSH client dies mid-run, the agent gets no hang-up signal
 (there is no TTY); it runs until its next write fails, and tini reaps it.
