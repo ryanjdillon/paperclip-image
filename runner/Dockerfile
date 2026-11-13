@@ -5,27 +5,38 @@
 #
 # Paperclip's SSH driver needs sh, tar and git (the workspace arrives as a tar
 # plus a git bundle), node (it runs the callback bridge), and the agent CLIs.
-# Everything is pinned: the base by digest, the CLIs by version.
+# The base is pinned by digest and the CLIs by version (Renovate bumps both);
+# apt packages float, so a rebuild picks up Debian security fixes.
 
 FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 
-# ripgrep: agent CLIs search with the system rg; without it some try to
-# download one at run time, which fails behind restricted egress.
+# ripgrep: for agent CLIs that look for a system rg (Claude Code bundles its
+# own); without it some try to download one at run time, which fails behind
+# restricted egress.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
       git \
       openssh-server \
       ripgrep \
-      tar \
       tini \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_*
 
+# Installed as root: the global modules stay root-owned and, on a read-only
+# root filesystem, immutable to the agent user.
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=2.1.323
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force \
- && claude --version
+ && claude --version \
+ && rm -rf /root/.claude /root/.claude.json
+
+# Claude Code reads managed settings before user or project ones, and agents
+# cannot override them: no self-update (it would install into the writable
+# home and defeat the pin), no non-essential traffic.
+COPY managed-settings.json /etc/claude-code/managed-settings.json
+COPY profile.sh /etc/profile.d/paperclip-runner.sh
 
 COPY sshd_config /etc/ssh/sshd_config
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -15,8 +15,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: runner-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   image:
+    # The called job declares packages: write and cannot exceed this grant,
+    # even when it only builds; registry login is skipped unless pushing.
     permissions:
       contents: read
       packages: write
@@ -25,5 +31,5 @@ jobs:
       image: ryanjdillon/paperclip-agent-runner
       context: runner
       platforms: linux/amd64
-      # Pull requests only check that the image builds.
-      push: ${{ github.event_name != 'pull_request' }}
+      # Only main publishes; pull requests and other branches only build.
+      push: ${{ github.ref == 'refs/heads/main' }}
