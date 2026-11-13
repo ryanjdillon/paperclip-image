@@ -4,8 +4,10 @@
 # The home persists across restarts and every run writes to it as the same
 # user, so anything that would execute or steer a later run is reset here:
 # shell startup files (sourced by Paperclip's driver before every command,
-# and by bash), Claude Code's user settings, memory and extensions, git's
-# user config, and ~/.ssh. Paths are removed with rm -rf, so a planted
+# and by bash), Claude Code's user settings, memory and extensions, pi's user
+# config, extensions and skills (~/.pi, ~/.agents), git's user config, and
+# ~/.ssh. Neither CLI keeps sessions there over SSH: Paperclip passes them
+# per run. Paths are removed with rm -rf, so a planted
 # directory or symlink cannot stop the runner from starting.
 set -eu
 
@@ -41,7 +43,9 @@ for path in \
   .claude/skills \
   .claude/plugins \
   .claude/output-styles \
-  .claude/hooks
+  .claude/hooks \
+  .pi \
+  .agents
 do
   rm -rf "${HOME:?}/$path"
 done

@@ -17,12 +17,9 @@
   ],
   "packageRules": [
     {
-      "description": "pi 1.x changes the CLI contract Paperclip's pi_local adapter (0.74) is written against; take it deliberately.",
+      "description": "pi breaks its CLI between 0.x minors; bump it only with Paperclip's pi_local adapter pin (SANDBOX_INSTALL_COMMAND).",
       "matchPackageNames": [
         "@earendil-works/pi-coding-agent"
-      ],
-      "matchUpdateTypes": [
-        "major"
       ],
       "enabled": false
     }

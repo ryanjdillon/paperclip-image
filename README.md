@@ -41,8 +41,8 @@ path to the server.
   and non-essential traffic. Agents cannot override those settings.
 - Agent CLIs: Claude Code and pi (`pi_local`, run offline: no version
   checks, telemetry or tool downloads).
-- The base image is pinned by digest and the CLIs by version; Renovate bumps
-  them.
+- The base image is pinned by digest and the CLIs by version. Renovate bumps
+  the base and Claude Code; pi is bumped by hand with Paperclip's adapter.
 
 ### Limits
 
@@ -53,10 +53,14 @@ shell startup files, Claude Code settings and extensions, git config, files
 and git hooks in reused workspaces, and other agents' session transcripts.
 
 On start the entrypoint removes the shell startup files, Claude Code's user
-settings, memory and extensions, its user-scope MCP servers, git's user
-config and `~/.npmrc`, and rebuilds `~/.ssh`; sshd never runs `~/.ssh/rc`.
+settings, memory and extensions, its user-scope MCP servers, pi's user config
+(`~/.pi`, `~/.agents`), git's user config and `~/.npmrc`, and rebuilds
+`~/.ssh`; sshd never runs `~/.ssh/rc`.
 Workspaces and session transcripts (`~/.claude/projects`, needed to resume)
 are kept. The host private key is readable by runs too (same UID).
+
+Config that arrives with a workspace (a repository's `.pi/`, `.claude/` or
+`AGENTS.md`) is part of that repository's trust, not reset here.
 
 Run one runner per trust level, and allow port 2222 only from the Paperclip
 server.
