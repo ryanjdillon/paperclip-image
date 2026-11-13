@@ -6,3 +6,10 @@ export DISABLE_AUTOUPDATER=1
 export PI_OFFLINE=1
 export PI_SKIP_VERSION_CHECK=1
 export PI_TELEMETRY=0
+
+# The AI gateway client key for agent CLIs (pi's providers config names
+# AI_GATEWAY_KEY), when the runner has one mounted from a Kubernetes Secret.
+if [ -r /run/secrets/ai-gateway/key ]; then
+  AI_GATEWAY_KEY=$(cat /run/secrets/ai-gateway/key)
+  export AI_GATEWAY_KEY
+fi
