@@ -39,8 +39,10 @@ path to the server.
 - Claude Code's managed settings (`/etc/claude-code/managed-settings.json`)
   allow only managed hooks (none are defined), and turn off the self-updater
   and non-essential traffic. Agents cannot override those settings.
-- The base image is pinned by digest and Claude Code by version; Renovate
-  bumps both.
+- Agent CLIs: Claude Code and pi (`pi_local`, run offline: no version
+  checks, telemetry or tool downloads).
+- The base image is pinned by digest and the CLIs by version; Renovate bumps
+  them.
 
 ### Limits
 

@@ -1,14 +1,30 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>ryanjdillon/workflows//renovate/default#v1"],
+  "extends": [
+    "github>ryanjdillon/workflows//renovate/default#v1"
+  ],
   "customManagers": [
     {
       "description": "Versions pinned in Dockerfile ARGs, marked with a '# renovate:' comment.",
       "customType": "regex",
-      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/"
+      ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\S+=(?<currentValue>\\S+)"
       ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "pi 1.x changes the CLI contract Paperclip's pi_local adapter (0.74) is written against; take it deliberately.",
+      "matchPackageNames": [
+        "@earendil-works/pi-coding-agent"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
     }
   ]
 }

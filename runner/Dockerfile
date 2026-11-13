@@ -10,14 +10,15 @@
 
 FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 
-# ripgrep: for agent CLIs that look for a system rg (Claude Code bundles its
-# own); without it some try to download one at run time, which fails behind
-# restricted egress.
+# ripgrep and fd: for agent CLIs that look for system rg/fd (pi's grep and
+# find tools; Claude Code bundles its own rg); without them some try to
+# download one at run time, which fails behind restricted egress.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
       git \
       openssh-server \
+      fd-find \
       ripgrep \
       tini \
  && rm -rf /var/lib/apt/lists/* \
@@ -35,6 +36,14 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
 # Claude Code's managed settings take precedence over user and project ones:
 # only managed hooks run (none are defined), no self-update (it would install
 # into the writable home and defeat the pin), no non-essential traffic.
+# pi (Paperclip's pi_local adapter): 0.74.0 is the CLI contract the adapter is
+# written against; hold 1.x until tested.
+# renovate: datasource=npm depName=@earendil-works/pi-coding-agent
+ARG PI_VERSION=0.74.0
+RUN npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+ && npm cache clean --force \
+ && pi --version
+
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 COPY profile.sh /etc/profile.d/paperclip-runner.sh
 
