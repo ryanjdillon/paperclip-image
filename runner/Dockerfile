@@ -14,12 +14,22 @@
 # Nix, as one static binary (no store closure of its own), so it lives in the
 # read-only image while the store (/nix) is the runner's volume. Realised by
 # store path from cache.nixos.org, whose signature and NAR hash the nixos/nix
-# image verifies. To bump: `nix eval --raw nixpkgs#pkgsStatic.nix.outPath`,
-# then take bin/nix's target (`readlink -f`) from the realised path.
+# image verifies; the binary's own hash is pinned too, so the image does not
+# rest on that key alone.
+#
+# To bump (Renovate opens a PR for a new NIX_VERSION but cannot do this):
+#   1. NIX_STATIC: `nix eval --raw nixpkgs#pkgsStatic.nix.outPath` on a
+#      nixpkgs that has the new version;
+#   2. the nixos/nix tag and digest below, to the same version;
+#   3. NIX_STATIC_SHA256: build once, take the hash from the failing check.
+# renovate: datasource=github-releases depName=NixOS/nix
+ARG NIX_VERSION=2.34.8
 FROM nixos/nix:2.34.8@sha256:1a711b619c8a713eff32c3f8d8781b3b4d0130cb91c0a57f67e87abfeeb90b01 AS nix
 ARG NIX_STATIC=/nix/store/3xmxs0yzg4z038drg96wds1z5h1mggk6-nix-static-x86_64-unknown-linux-musl-2.34.8
+ARG NIX_STATIC_SHA256=7363d39abe68fdc3311b2243c22ce219df384ee9ae236dd603df7b6ae62cbd15
 RUN nix-store --realise "$NIX_STATIC" \
  && install -m 755 "$NIX_STATIC/bin/nix" /nix-static \
+ && echo "$NIX_STATIC_SHA256  /nix-static" | sha256sum -c - \
  && /nix-static --version
 
 FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54

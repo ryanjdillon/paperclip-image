@@ -32,6 +32,16 @@
         "nixos/nix"
       ],
       "enabled": false
+    },
+    {
+      "description": "Nix releases (NIX_VERSION in runner/Dockerfile) are flagged, never merged automatically: the bump also needs NIX_STATIC, the nixos/nix image and NIX_STATIC_SHA256 (see the Dockerfile).",
+      "matchDatasources": [
+        "github-releases"
+      ],
+      "matchPackageNames": [
+        "NixOS/nix"
+      ],
+      "automerge": false
     }
   ]
 }
