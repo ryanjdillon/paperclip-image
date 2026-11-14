@@ -22,17 +22,17 @@ a small node bridge on the runner's loopback; the server polls its file queue
 with short SSH commands about every 100 ms. So the runner needs no network
 path to the server.
 
-- `sshd` runs unprivileged as `node` (UID 1000) on port 2222: public keys
+- `sshd` runs unprivileged as `node` (UID and GID 20100) on port 2222: public keys
   only, no TTY, no forwarding, no sftp.
 - Keys are mounted from a Secret at `/keys` (`ssh_host_ed25519_key`,
-  `authorized_keys`) with a mode UID 1000 can read (`0444`, or `0440` with
-  `fsGroup: 1000`). The entrypoint copies the host key to `/tmp/sshd` and
+  `authorized_keys`) with a mode UID 20100 can read (`0444`, or `0440` with
+  `fsGroup: 20100`). The entrypoint copies the host key to `/tmp/sshd` and
   `authorized_keys` to `~/.ssh`.
 - Mount a volume at `/home/node` (workspaces and Claude Code's session state).
-  It must be owned by UID 1000 and not group- or world-writable, or sshd's
+  It must be owned by UID 20100 and not group- or world-writable, or sshd's
   StrictModes refuses every login; the entrypoint exits with a clear message
   if the owner is wrong. An initContainer running as root can
-  `chown 1000:1000 /home/node && chmod 700 /home/node`.
+  `chown 20100:20100 /home/node && chmod 700 /home/node`.
 - Pin the host key on the Paperclip side: put `[host]:2222 ssh-ed25519 …` in
   the environment's known hosts and turn on strict host key checking.
   Otherwise the driver accepts any host key.
@@ -53,7 +53,7 @@ path to the server.
 - Base tools: git, curl, jq, python3 (with venv), make, unzip, less, file,
   xz, ripgrep and fd. Anything more comes from the repository's own flake.
 - Nix (single-user, static binary at `/usr/local/bin/nix`, flakes on): mount
-  a volume at `/nix` owned by UID 1000 (the same initContainer can chown it).
+  a volume at `/nix` owned by UID 20100 (the same initContainer can chown it).
   Agents run a repository's toolchain with `nix develop -c <cmd>`, pinned by
   its `flake.lock`. `/etc/nix/nix.conf` allows cache.nixos.org only, with
   signatures required, and ignores a flake's `nixConfig`. There is no build

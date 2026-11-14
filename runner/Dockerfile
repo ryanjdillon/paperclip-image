@@ -105,17 +105,24 @@ COPY nix-store-check.py /usr/local/bin/nix-store-check
 # hash formats it relies on against this Nix (a throwaway store).
 RUN /usr/local/bin/nix-store-check --build /tmp/nix-store-check \
  && rm -rf /tmp/nix-store-check
+# The agent user: the base image's node user, moved off UID/GID 1000, which is
+# usually the first login user on the host whose disk backs the volumes.
+# 20100 is outside the usual ranges for system, login, subordinate (100000+)
+# and nixbld (30000+) IDs.
+RUN groupmod -g 20100 node \
+ && usermod -u 20100 -g 20100 node \
+ && test "$(id -u node):$(id -g node)" = 20100:20100
 # The mount point for the store volume; owned by the agent user so a local
 # `docker run` without the volume works too.
-RUN mkdir -m 755 /nix && chown 1000:1000 /nix
+RUN mkdir -m 755 /nix && chown 20100:20100 /nix
 
 COPY sshd_config /etc/ssh/sshd_config
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# sshd runs as the image's node user (UID 1000), so it can only ever log that
-# user in. Host and authorized keys are mounted from a Secret at /keys and
-# copied into place by the entrypoint.
-USER 1000:1000
+# sshd runs as the image's node user, so it can only ever log that user in.
+# Host and authorized keys are mounted from a Secret at /keys and copied into
+# place by the entrypoint.
+USER 20100:20100
 WORKDIR /home/node
 EXPOSE 2222
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
