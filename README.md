@@ -38,7 +38,12 @@ path to the server.
   Otherwise the driver accepts any host key.
 - Claude Code's managed settings (`/etc/claude-code/managed-settings.json`)
   allow only managed hooks (none are defined), and turn off the self-updater
-  and non-essential traffic. Agents cannot override those settings.
+  and non-essential traffic. MCP servers are limited to Paperclip's own (its
+  Service URL, or a loopback bridge): a repository's `.mcp.json` or
+  `.claude/settings.json` cannot add or auto-approve others. That matters
+  because Paperclip's `claude_local` agents run with
+  `--setting-sources user,project`, so project settings apply. Agents cannot
+  override managed settings.
 - pi providers: a `models.json` mounted at
   `/etc/paperclip-runner/pi/models.json` is copied to `~/.pi/agent/` on start
   (after the reset), so pi knows custom providers, e.g. the AI gateway, even

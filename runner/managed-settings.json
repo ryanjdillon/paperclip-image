@@ -1,5 +1,11 @@
 {
   "allowManagedHooksOnly": true,
+  "enableAllProjectMcpServers": false,
+  "allowManagedMcpServersOnly": true,
+  "allowedMcpServers": [
+    { "serverUrl": "http://paperclip.paperclip.svc.cluster.local:3100/*" },
+    { "serverUrl": "http://127.0.0.1:*/*" }
+  ],
   "env": {
     "DISABLE_AUTOUPDATER": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
