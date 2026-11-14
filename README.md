@@ -38,7 +38,12 @@ path to the server.
   Otherwise the driver accepts any host key.
 - Claude Code's managed settings (`/etc/claude-code/managed-settings.json`)
   allow only managed hooks (none are defined), and turn off the self-updater
-  and non-essential traffic. Agents cannot override those settings.
+  and non-essential traffic. MCP servers are limited to Paperclip's own (its
+  Service URL, or a loopback bridge): a repository's `.mcp.json` or
+  `.claude/settings.json` cannot add or auto-approve others. That matters
+  because Paperclip's `claude_local` agents run with
+  `--setting-sources user,project`, so project settings apply. Agents cannot
+  override managed settings.
 - pi providers: a `models.json` mounted at
   `/etc/paperclip-runner/pi/models.json` is copied to `~/.pi/agent/` on start
   (after the reset), so pi knows custom providers, e.g. the AI gateway, even
@@ -53,9 +58,12 @@ path to the server.
   its `flake.lock`. `/etc/nix/nix.conf` allows cache.nixos.org only, with
   signatures required, and ignores a flake's `nixConfig`. There is no build
   sandbox (it needs user namespaces, which RuntimeDefault seccomp refuses).
-  When the store is over `NIX_STORE_GC_MB` (default 40000) at start, the
-  entrypoint collects garbage in the background. Without a writable `/nix`,
-  nix is unavailable and everything else works.
+  No flake registries, no user nix.conf (`NIX_USER_CONF_FILES` is empty),
+  builds in `/nix/var/nix/builds` rather than `/tmp`, and garbage collection
+  when the volume's filesystem has under 10 GiB free. At every start, before
+  sshd, the store is checked (see Limits); over `NIX_STORE_GC_MB` (default
+  40000) it is emptied instead. Without a writable `/nix`, nix is unavailable
+  and everything else works.
 - Install hygiene: npm (and pnpm) skip dependency install scripts
   (`ignore-scripts`, in the global npmrc and the profile); a run opts in per
   command with `--ignore-scripts=false`, visibly. Use lockfile installs
@@ -75,16 +83,32 @@ and git hooks in reused workspaces, and other agents' session transcripts.
 On start the entrypoint removes the shell startup files, Claude Code's user
 settings, memory and extensions, its user-scope MCP servers, pi's user config
 (`~/.pi`, `~/.agents`), git's user config and `~/.npmrc`, Nix's user
-config, registry, profiles and fetcher cache, and rebuilds `~/.ssh`; sshd
-never runs `~/.ssh/rc`.
+and nixpkgs config, registry, profiles and fetcher cache, Python's user
+site-packages and pip/uv config, and rebuilds `~/.ssh`; sshd never runs
+`~/.ssh/rc`. Python ignores user site-packages anyway (`PYTHONNOUSERSITE`).
 Workspaces and session transcripts (`~/.claude/projects`, needed to resume)
 are kept. The host private key is readable by runs too (same UID).
 
-The Nix store is kept, and in single-user mode its owner is the agent user:
-a run can make a store path writable and change it, and later runs that use
-that path get the change. Nix's own binary is in the image and cannot be
-changed. A fresh store per run (or a verified one) belongs with fresh pods
-per run.
+In single-user mode the agent user owns the Nix store: a run can make a store
+path writable and change it, or edit the database. At every start, before
+sshd, `nix-store-check` checks the whole store with only the image's config.
+A path is kept only if its contents match its recorded hash and it is signed
+by cache.nixos.org, or it is a sha256 fixed-output path (a source) whose
+contents hash to its name. Nix itself trusts every content-addressed path
+without checking its contents against its name, so text paths (`.drv` files)
+are always deleted; evaluation writes them again. The database must have
+exactly the schema of a fresh Nix database (recorded at image build, where a
+self-test also pins the hash formats), so a planted trigger cannot
+re-register a deleted path, and the store must end up as exactly the paths
+that passed. Failing paths are deleted
+with everything that refers to them; unsigned paths are local builds and are
+rebuilt when needed. Everything on the volume but the store and its database
+(GC roots, profiles, build logs) is removed, as are store entries the
+database does not know. Any problem with the check (an unreadable database,
+a symlink in place of a store directory, an error) wipes the store; only a
+failed wipe stops the runner. Between
+two starts runs share the store, so they are one trust domain until fresh
+pods per run. Nix's own binary is in the image and cannot be changed.
 
 Config that arrives with a workspace (a repository's `.pi/`, `.claude/` or
 `AGENTS.md`) is part of that repository's trust, not reset here.

@@ -14,12 +14,24 @@
 # Nix, as one static binary (no store closure of its own), so it lives in the
 # read-only image while the store (/nix) is the runner's volume. Realised by
 # store path from cache.nixos.org, whose signature and NAR hash the nixos/nix
-# image verifies. To bump: `nix eval --raw nixpkgs#pkgsStatic.nix.outPath`,
-# then take bin/nix's target (`readlink -f`) from the realised path.
+# image verifies; the binary's own hash is pinned too, so the image does not
+# rest on that key alone.
+#
+# To bump (Renovate opens a PR for a new NIX_VERSION but cannot do this):
+#   1. NIX_STATIC: `nix eval --raw nixpkgs#pkgsStatic.nix.outPath` on a
+#      nixpkgs that has the new version;
+#   2. the nixos/nix tag and digest below, to the same version;
+#   3. NIX_STATIC_SHA256: build once, take the hash from the failing check.
+# NIX_VERSION is only a Renovate trigger (nothing reads it): a new Nix release
+# opens a PR that reminds us to do the three steps above.
+# renovate: datasource=github-releases depName=NixOS/nix
+ARG NIX_VERSION=2.34.8
 FROM nixos/nix:2.34.8@sha256:1a711b619c8a713eff32c3f8d8781b3b4d0130cb91c0a57f67e87abfeeb90b01 AS nix
 ARG NIX_STATIC=/nix/store/3xmxs0yzg4z038drg96wds1z5h1mggk6-nix-static-x86_64-unknown-linux-musl-2.34.8
+ARG NIX_STATIC_SHA256=7363d39abe68fdc3311b2243c22ce219df384ee9ae236dd603df7b6ae62cbd15
 RUN nix-store --realise "$NIX_STATIC" \
  && install -m 755 "$NIX_STATIC/bin/nix" /nix-static \
+ && echo "$NIX_STATIC_SHA256  /nix-static" | sha256sum -c - \
  && /nix-static --version
 
 FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
@@ -88,6 +100,11 @@ RUN for n in nix-build nix-collect-garbage nix-env nix-hash nix-instantiate \
     done \
  && nix --version
 COPY nix.conf /etc/nix/nix.conf
+COPY nix-store-check.py /usr/local/bin/nix-store-check
+# Record a fresh Nix database's schema for the start-time check, and test the
+# hash formats it relies on against this Nix (a throwaway store).
+RUN /usr/local/bin/nix-store-check --build /tmp/nix-store-check \
+ && rm -rf /tmp/nix-store-check
 # The mount point for the store volume; owned by the agent user so a local
 # `docker run` without the volume works too.
 RUN mkdir -m 755 /nix && chown 1000:1000 /nix

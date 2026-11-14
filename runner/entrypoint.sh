@@ -11,11 +11,15 @@
 # directory or symlink cannot stop the runner from starting. pi's providers
 # (~/.pi/agent/models.json) are then re-seeded from the deployment's mount.
 #
-# Nix: the store (/nix, its own volume) persists; it is content-addressed and
-# every run's toolchains come from it. The user's Nix config, registry,
-# profiles and fetcher cache are reset: a planted nix.conf or registry entry
-# could point later runs at another cache or flake, and nothing needs a
-# profile (`nix develop` does not use one, and none is on PATH).
+# Nix: the store (/nix, its own volume) is kept as a cache but checked at
+# every start (nix-store-check): every path must match its recorded hash and
+# be signed by cache.nixos.org, or be a fixed-output path whose contents hash
+# to its name; failing paths are deleted. In single-user mode a run can rewrite store paths, and a path is
+# named after its build inputs, not its contents. Between two starts, runs
+# share the store (DIL-890). The user's Nix config, nixpkgs config, registry,
+# profiles and fetcher cache are reset too (nothing needs a profile: `nix
+# develop` does not use one, and none is on PATH). Python's user site-packages
+# and pip/uv config go as well (a .pth file there runs on every python start).
 set -eu
 
 keys=${KEYS_DIR:-/keys}
@@ -54,14 +58,20 @@ for path in \
   .pi \
   .agents \
   .config/nix \
+  .config/nixpkgs \
+  .nixpkgs \
   .nix-profile \
   .nix-defexpr \
   .nix-channels \
   .local/state/nix \
-  .cache/nix
+  .cache/nix \
+  .config/pip \
+  .pip \
+  .config/uv
 do
   rm -rf "${HOME:?}/$path"
 done
+rm -rf "${HOME:?}"/.local/lib/python3*
 
 # User-scope MCP servers in ~/.claude.json start with every session. Keep
 # the file (it holds onboarding state; without it startup dialogs block a
@@ -92,17 +102,13 @@ else
 fi
 
 # The Nix store: usable only when /nix is a volume this user owns (the
-# Deployment's initContainer chowns it). When it has grown past
-# NIX_STORE_GC_MB, collect garbage in the background so sshd starts at once;
-# no run holds a GC root, so this keeps only what a running build is using.
+# Deployment's initContainer chowns it). Checked before sshd starts, so no run
+# sees an unchecked store; if the check fails, the runner does not start.
 if [ -d /nix ] && [ -w /nix ]; then
-  (
-    used=$(du -sm /nix/store 2>/dev/null | cut -f1)
-    if [ "${used:-0}" -gt "${NIX_STORE_GC_MB:-40000}" ]; then
-      echo "entrypoint: nix store is ${used} MiB; collecting garbage" >&2
-      nice nix store gc >/dev/null 2>&1 || echo "entrypoint: nix store gc failed" >&2
-    fi
-  ) &
+  if ! /usr/local/bin/nix-store-check; then
+    echo "entrypoint: the Nix store check failed; not starting sshd" >&2
+    exit 1
+  fi
 else
   echo "entrypoint: /nix is not a writable volume; nix is unavailable" >&2
 fi
