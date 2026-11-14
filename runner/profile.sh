@@ -13,3 +13,9 @@ export npm_config_ignore_scripts=true
 # /etc/nix/nix.conf. Toolchains come from `nix develop -c <cmd>` in a repo
 # with a flake; there is deliberately no profile on PATH.
 export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+# Nix reads no user config file (~/.config/nix/nix.conf), only the image's
+# /etc/nix/nix.conf: set but empty means an empty list of user files.
+export NIX_USER_CONF_FILES=
+# Python: no user site-packages, so a .pth file a run leaves in
+# ~/.local/lib/python3.*/site-packages cannot run code in later runs.
+export PYTHONNOUSERSITE=1

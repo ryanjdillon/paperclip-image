@@ -11,11 +11,14 @@
 # directory or symlink cannot stop the runner from starting. pi's providers
 # (~/.pi/agent/models.json) are then re-seeded from the deployment's mount.
 #
-# Nix: the store (/nix, its own volume) persists; it is content-addressed and
-# every run's toolchains come from it. The user's Nix config, registry,
-# profiles and fetcher cache are reset: a planted nix.conf or registry entry
-# could point later runs at another cache or flake, and nothing needs a
-# profile (`nix develop` does not use one, and none is on PATH).
+# Nix: the store (/nix, its own volume) is wiped at every start. In
+# single-user mode any run can rewrite store paths or the database, and a path
+# is named after its build inputs, not its contents, so a tampered copy would
+# otherwise serve later runs. It is a cache for one pod's lifetime; losing it
+# costs only downloads. The user's Nix config, nixpkgs config, registry,
+# profiles and fetcher cache are reset too (nothing needs a profile: `nix
+# develop` does not use one, and none is on PATH). Python's user site-packages
+# and pip/uv config go as well (a .pth file there runs on every python start).
 set -eu
 
 keys=${KEYS_DIR:-/keys}
@@ -54,14 +57,20 @@ for path in \
   .pi \
   .agents \
   .config/nix \
+  .config/nixpkgs \
+  .nixpkgs \
   .nix-profile \
   .nix-defexpr \
   .nix-channels \
   .local/state/nix \
-  .cache/nix
+  .cache/nix \
+  .config/pip \
+  .pip \
+  .config/uv
 do
   rm -rf "${HOME:?}/$path"
 done
+rm -rf "${HOME:?}"/.local/lib/python3*
 
 # User-scope MCP servers in ~/.claude.json start with every session. Keep
 # the file (it holds onboarding state; without it startup dialogs block a
@@ -92,16 +101,27 @@ else
 fi
 
 # The Nix store: usable only when /nix is a volume this user owns (the
-# Deployment's initContainer chowns it). When it has grown past
-# NIX_STORE_GC_MB, collect garbage in the background so sshd starts at once;
-# no run holds a GC root, so this keeps only what a running build is using.
+# Deployment's initContainer chowns it). Wipe it (see above): move everything
+# on the volume aside, which is instant, and delete it in the background so
+# sshd starts at once. Nix recreates an empty store on first use. Store paths
+# are read-only, so they are made writable before the delete (a directory
+# needs its own write bit to move to another parent); leftovers of an earlier
+# start that died mid-delete go too.
 if [ -d /nix ] && [ -w /nix ]; then
+  trash=/nix/.trash-$$-$(date +%s)
+  mkdir "$trash"
+  for entry in /nix/* /nix/.[!.]*; do
+    case "$entry" in /nix/.trash-*|'/nix/*'|'/nix/.[!.]*') continue ;; esac
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    [ -L "$entry" ] || chmod u+w "$entry" 2>/dev/null || true
+    mv "$entry" "$trash/"
+  done
   (
-    used=$(du -sm /nix/store 2>/dev/null | cut -f1)
-    if [ "${used:-0}" -gt "${NIX_STORE_GC_MB:-40000}" ]; then
-      echo "entrypoint: nix store is ${used} MiB; collecting garbage" >&2
-      nice nix store gc >/dev/null 2>&1 || echo "entrypoint: nix store gc failed" >&2
-    fi
+    for t in /nix/.trash-*; do
+      [ -e "$t" ] || continue
+      chmod -R u+w "$t" 2>/dev/null || true
+      rm -rf "$t" || echo "entrypoint: could not delete $t" >&2
+    done
   ) &
 else
   echo "entrypoint: /nix is not a writable volume; nix is unavailable" >&2
