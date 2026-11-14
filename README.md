@@ -90,15 +90,20 @@ Workspaces and session transcripts (`~/.claude/projects`, needed to resume)
 are kept. The host private key is readable by runs too (same UID).
 
 In single-user mode the agent user owns the Nix store: a run can make a store
-path writable and change it, or edit the database. At every start
-`nix-store-check` verifies the whole store with only the image's config: each
-path must be signed by cache.nixos.org (or be content-addressed) and match its
-recorded hash. Failing paths are deleted with everything that refers to them;
-unsigned paths are local builds and are rebuilt when needed. GC roots,
-profiles and entries the database does not know are removed. If the check
-cannot run, the store is wiped. Between two starts runs share the store, so
-they are one trust domain until fresh pods per run. Nix's own binary is in the
-image and cannot be changed.
+path writable and change it, or edit the database. At every start, before
+sshd, `nix-store-check` checks the whole store with only the image's config.
+A path is kept only if its contents match its recorded hash and it is signed
+by cache.nixos.org, or it is a sha256 fixed-output path (a source) whose
+contents hash to its name. Nix itself trusts every content-addressed path
+without checking its contents against its name, so text paths (`.drv` files)
+are always deleted; evaluation writes them again. Failing paths are deleted
+with everything that refers to them; unsigned paths are local builds and are
+rebuilt when needed. Everything on the volume but the store and its database
+(GC roots, profiles, build logs) is removed, as are store entries the
+database does not know. An unreadable database or a symlink in place of a
+store directory wipes the store; any other failure stops the runner. Between
+two starts runs share the store, so they are one trust domain until fresh
+pods per run. Nix's own binary is in the image and cannot be changed.
 
 Config that arrives with a workspace (a repository's `.pi/`, `.claude/` or
 `AGENTS.md`) is part of that repository's trust, not reset here.

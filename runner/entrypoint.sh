@@ -12,9 +12,9 @@
 # (~/.pi/agent/models.json) are then re-seeded from the deployment's mount.
 #
 # Nix: the store (/nix, its own volume) is kept as a cache but checked at
-# every start (nix-store-check): every path must be signed by cache.nixos.org
-# or content-addressed, and match its recorded hash; failing paths are
-# deleted. In single-user mode a run can rewrite store paths, and a path is
+# every start (nix-store-check): every path must match its recorded hash and
+# be signed by cache.nixos.org, or be a fixed-output path whose contents hash
+# to its name; failing paths are deleted. In single-user mode a run can rewrite store paths, and a path is
 # named after its build inputs, not its contents. Between two starts, runs
 # share the store (DIL-890). The user's Nix config, nixpkgs config, registry,
 # profiles and fetcher cache are reset too (nothing needs a profile: `nix
@@ -103,9 +103,12 @@ fi
 
 # The Nix store: usable only when /nix is a volume this user owns (the
 # Deployment's initContainer chowns it). Checked before sshd starts, so no run
-# sees an unchecked store.
+# sees an unchecked store; if the check fails, the runner does not start.
 if [ -d /nix ] && [ -w /nix ]; then
-  /usr/local/bin/nix-store-check
+  if ! /usr/local/bin/nix-store-check; then
+    echo "entrypoint: the Nix store check failed; not starting sshd" >&2
+    exit 1
+  fi
 else
   echo "entrypoint: /nix is not a writable volume; nix is unavailable" >&2
 fi

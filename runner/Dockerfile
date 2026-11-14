@@ -22,6 +22,8 @@
 #      nixpkgs that has the new version;
 #   2. the nixos/nix tag and digest below, to the same version;
 #   3. NIX_STATIC_SHA256: build once, take the hash from the failing check.
+# NIX_VERSION is only a Renovate trigger (nothing reads it): a new Nix release
+# opens a PR that reminds us to do the three steps above.
 # renovate: datasource=github-releases depName=NixOS/nix
 ARG NIX_VERSION=2.34.8
 FROM nixos/nix:2.34.8@sha256:1a711b619c8a713eff32c3f8d8781b3b4d0130cb91c0a57f67e87abfeeb90b01 AS nix
@@ -98,7 +100,7 @@ RUN for n in nix-build nix-collect-garbage nix-env nix-hash nix-instantiate \
     done \
  && nix --version
 COPY nix.conf /etc/nix/nix.conf
-COPY nix-store-check.sh /usr/local/bin/nix-store-check
+COPY nix-store-check.py /usr/local/bin/nix-store-check
 # The mount point for the store volume; owned by the agent user so a local
 # `docker run` without the volume works too.
 RUN mkdir -m 755 /nix && chown 1000:1000 /nix
