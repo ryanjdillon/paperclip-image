@@ -101,6 +101,10 @@ RUN for n in nix-build nix-collect-garbage nix-env nix-hash nix-instantiate \
  && nix --version
 COPY nix.conf /etc/nix/nix.conf
 COPY nix-store-check.py /usr/local/bin/nix-store-check
+# Record a fresh Nix database's schema for the start-time check, and test the
+# hash formats it relies on against this Nix (a throwaway store).
+RUN /usr/local/bin/nix-store-check --build /tmp/nix-store-check \
+ && rm -rf /tmp/nix-store-check
 # The mount point for the store volume; owned by the agent user so a local
 # `docker run` without the volume works too.
 RUN mkdir -m 755 /nix && chown 1000:1000 /nix

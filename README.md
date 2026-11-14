@@ -96,12 +96,17 @@ A path is kept only if its contents match its recorded hash and it is signed
 by cache.nixos.org, or it is a sha256 fixed-output path (a source) whose
 contents hash to its name. Nix itself trusts every content-addressed path
 without checking its contents against its name, so text paths (`.drv` files)
-are always deleted; evaluation writes them again. Failing paths are deleted
+are always deleted; evaluation writes them again. The database must have
+exactly the schema of a fresh Nix database (recorded at image build, where a
+self-test also pins the hash formats), so a planted trigger cannot
+re-register a deleted path, and the store must end up as exactly the paths
+that passed. Failing paths are deleted
 with everything that refers to them; unsigned paths are local builds and are
 rebuilt when needed. Everything on the volume but the store and its database
 (GC roots, profiles, build logs) is removed, as are store entries the
-database does not know. An unreadable database or a symlink in place of a
-store directory wipes the store; any other failure stops the runner. Between
+database does not know. Any problem with the check (an unreadable database,
+a symlink in place of a store directory, an error) wipes the store; only a
+failed wipe stops the runner. Between
 two starts runs share the store, so they are one trust domain until fresh
 pods per run. Nix's own binary is in the image and cannot be changed.
 
