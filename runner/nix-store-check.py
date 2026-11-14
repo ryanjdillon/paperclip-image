@@ -103,12 +103,13 @@ def wipe(reason):
     trash = tempfile.mkdtemp(dir=NIX, prefix=".trash-")
     for name in os.listdir(NIX):
         src = os.path.join(NIX, name)
-        if src == trash or name.startswith(".trash-"):
+        if src == trash:
             continue
         if real_dir(src):
             os.chmod(src, 0o700)  # moving a directory updates its "..".
         os.rename(src, os.path.join(trash, name))
     log(f"{reason}; store wiped")
+    return trash
 
 
 def du_mb(path):
@@ -177,8 +178,9 @@ def clean_volume():
     """Keep only /nix/store and /nix/var/nix/db, each a real directory at
     every level; everything else (roots, profiles, logs, planted files) goes.
     """
+    # Includes the trash of an earlier start that died before purging it.
     for name in os.listdir(NIX):
-        if name in ("store", "var") or name.startswith(".trash-"):
+        if name in ("store", "var"):
             continue
         remove(os.path.join(NIX, name))
     for path in (STORE, "/nix/var", "/nix/var/nix", DB):
@@ -193,8 +195,10 @@ def clean_volume():
     if real_dir(DB):
         os.chmod(DB, 0o755)
         for name in os.listdir(DB):
-            if not stat.S_ISREG(os.lstat(os.path.join(DB, name)).st_mode):
-                raise Wipe("the store database holds a non-file")
+            st = os.lstat(os.path.join(DB, name))
+            # A hard link would let a run keep editing the file from elsewhere.
+            if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                raise Wipe("the store database holds a non-file or a hard link")
 
 
 def check():
@@ -262,14 +266,12 @@ def check():
         f"{extra} unregistered entries removed, in {time.time() - started:.0f}s")
 
 
-def purge_trash():
-    """Delete what wipe() moved aside, now or from a start that died before
-    finishing, in a detached process so sshd starts at once."""
-    trash = [os.path.join(NIX, n) for n in os.listdir(NIX) if n.startswith(".trash-")]
-    if trash:
-        subprocess.Popen(
-            [sys.executable, "-I", os.path.abspath(__file__), "--purge", *trash],
-            stdin=subprocess.DEVNULL, start_new_session=True)
+def purge_trash(trash):
+    """Delete what this start's wipe() moved aside, in a detached process so
+    sshd starts at once. (An earlier start's leftover goes in clean_volume.)"""
+    subprocess.Popen(
+        [sys.executable, "-I", os.path.abspath(__file__), "--purge", trash],
+        stdin=subprocess.DEVNULL, start_new_session=True)
 
 
 def build(db_root):
@@ -316,13 +318,15 @@ def main():
                 log(f"could not delete a wiped store ({exc.strerror})")
         return 0
     try:
+        trash = None
         try:
             check()
         except Wipe as reason:
-            wipe(str(reason))
+            trash = wipe(str(reason))
         except Exception as exc:  # noqa: BLE001 - any failure means wipe
-            wipe(f"check failed ({type(exc).__name__})")
-        purge_trash()
+            trash = wipe(f"check failed ({type(exc).__name__})")
+        if trash:
+            purge_trash(trash)
     except Exception as exc:  # noqa: BLE001 - only a failed wipe stops the runner
         log(f"wipe failed ({type(exc).__name__}); not starting")
         return 1
