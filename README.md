@@ -45,6 +45,22 @@ path to the server.
   where Paperclip runs it without per-run config (its environment test).
 - Agent CLIs: Claude Code and pi (`pi_local`, run offline: no version
   checks, telemetry or tool downloads).
+- Base tools: git, curl, jq, python3 (with venv), make, unzip, less, file,
+  xz, ripgrep and fd. Anything more comes from the repository's own flake.
+- Nix (single-user, static binary at `/usr/local/bin/nix`, flakes on): mount
+  a volume at `/nix` owned by UID 1000 (the same initContainer can chown it).
+  Agents run a repository's toolchain with `nix develop -c <cmd>`, pinned by
+  its `flake.lock`. `/etc/nix/nix.conf` allows cache.nixos.org only, with
+  signatures required, and ignores a flake's `nixConfig`. There is no build
+  sandbox (it needs user namespaces, which RuntimeDefault seccomp refuses).
+  When the store is over `NIX_STORE_GC_MB` (default 40000) at start, the
+  entrypoint collects garbage in the background. Without a writable `/nix`,
+  nix is unavailable and everything else works.
+- Install hygiene: npm (and pnpm) skip dependency install scripts
+  (`ignore-scripts`, in the global npmrc and the profile); a run opts in per
+  command with `--ignore-scripts=false`, visibly. Use lockfile installs
+  (`npm ci`, `pnpm install --frozen-lockfile`, `cargo --locked`,
+  `uv sync --locked`) and no `curl | sh`.
 - The base image is pinned by digest and the CLIs by version. Renovate bumps
   the base and Claude Code; pi is bumped by hand with Paperclip's adapter.
 
@@ -58,10 +74,17 @@ and git hooks in reused workspaces, and other agents' session transcripts.
 
 On start the entrypoint removes the shell startup files, Claude Code's user
 settings, memory and extensions, its user-scope MCP servers, pi's user config
-(`~/.pi`, `~/.agents`), git's user config and `~/.npmrc`, and rebuilds
-`~/.ssh`; sshd never runs `~/.ssh/rc`.
+(`~/.pi`, `~/.agents`), git's user config and `~/.npmrc`, Nix's user
+config, registry, profiles and fetcher cache, and rebuilds `~/.ssh`; sshd
+never runs `~/.ssh/rc`.
 Workspaces and session transcripts (`~/.claude/projects`, needed to resume)
 are kept. The host private key is readable by runs too (same UID).
+
+The Nix store is kept, and in single-user mode its owner is the agent user:
+a run can make a store path writable and change it, and later runs that use
+that path get the change. Nix's own binary is in the image and cannot be
+changed. A fresh store per run (or a verified one) belongs with fresh pods
+per run.
 
 Config that arrives with a workspace (a repository's `.pi/`, `.claude/` or
 `AGENTS.md`) is part of that repository's trust, not reset here.

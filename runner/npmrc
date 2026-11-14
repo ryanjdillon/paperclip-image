@@ -1,0 +1,9 @@
+; Global npm config for the agent runner (DIL-889). Dependency install scripts
+; (preinstall, install, postinstall, prepare) never run by default; a run that
+; needs them opts in per command with --ignore-scripts=false.
+ignore-scripts=true
+; Lockfile-only installs are a habit (npm ci), not a setting npm offers; this
+; at least keeps installs from rewriting the lockfile silently.
+save-exact=true
+fund=false
+update-notifier=false
