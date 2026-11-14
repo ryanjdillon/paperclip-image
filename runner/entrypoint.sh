@@ -11,11 +11,12 @@
 # directory or symlink cannot stop the runner from starting. pi's providers
 # (~/.pi/agent/models.json) are then re-seeded from the deployment's mount.
 #
-# Nix: the store (/nix, its own volume) is wiped at every start. In
-# single-user mode any run can rewrite store paths or the database, and a path
-# is named after its build inputs, not its contents, so a tampered copy would
-# otherwise serve later runs. It is a cache for one pod's lifetime; losing it
-# costs only downloads. The user's Nix config, nixpkgs config, registry,
+# Nix: the store (/nix, its own volume) is kept as a cache but checked at
+# every start (nix-store-check): every path must be signed by cache.nixos.org
+# or content-addressed, and match its recorded hash; failing paths are
+# deleted. In single-user mode a run can rewrite store paths, and a path is
+# named after its build inputs, not its contents. Between two starts, runs
+# share the store (DIL-890). The user's Nix config, nixpkgs config, registry,
 # profiles and fetcher cache are reset too (nothing needs a profile: `nix
 # develop` does not use one, and none is on PATH). Python's user site-packages
 # and pip/uv config go as well (a .pth file there runs on every python start).
@@ -101,28 +102,10 @@ else
 fi
 
 # The Nix store: usable only when /nix is a volume this user owns (the
-# Deployment's initContainer chowns it). Wipe it (see above): move everything
-# on the volume aside, which is instant, and delete it in the background so
-# sshd starts at once. Nix recreates an empty store on first use. Store paths
-# are read-only, so they are made writable before the delete (a directory
-# needs its own write bit to move to another parent); leftovers of an earlier
-# start that died mid-delete go too.
+# Deployment's initContainer chowns it). Checked before sshd starts, so no run
+# sees an unchecked store.
 if [ -d /nix ] && [ -w /nix ]; then
-  trash=/nix/.trash-$$-$(date +%s)
-  mkdir "$trash"
-  for entry in /nix/* /nix/.[!.]*; do
-    case "$entry" in /nix/.trash-*|'/nix/*'|'/nix/.[!.]*') continue ;; esac
-    [ -e "$entry" ] || [ -L "$entry" ] || continue
-    [ -L "$entry" ] || chmod u+w "$entry" 2>/dev/null || true
-    mv "$entry" "$trash/"
-  done
-  (
-    for t in /nix/.trash-*; do
-      [ -e "$t" ] || continue
-      chmod -R u+w "$t" 2>/dev/null || true
-      rm -rf "$t" || echo "entrypoint: could not delete $t" >&2
-    done
-  ) &
+  /usr/local/bin/nix-store-check
 else
   echo "entrypoint: /nix is not a writable volume; nix is unavailable" >&2
 fi

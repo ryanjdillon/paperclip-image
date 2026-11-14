@@ -60,9 +60,10 @@ path to the server.
   sandbox (it needs user namespaces, which RuntimeDefault seccomp refuses).
   No flake registries, no user nix.conf (`NIX_USER_CONF_FILES` is empty),
   builds in `/nix/var/nix/builds` rather than `/tmp`, and garbage collection
-  when the volume's filesystem has under 10 GiB free. The store is wiped at
-  every start (see Limits). Without a writable `/nix`, nix is unavailable and
-  everything else works.
+  when the volume's filesystem has under 10 GiB free. At every start, before
+  sshd, the store is checked (see Limits); over `NIX_STORE_GC_MB` (default
+  40000) it is emptied instead. Without a writable `/nix`, nix is unavailable
+  and everything else works.
 - Install hygiene: npm (and pnpm) skip dependency install scripts
   (`ignore-scripts`, in the global npmrc and the profile); a run opts in per
   command with `--ignore-scripts=false`, visibly. Use lockfile installs
@@ -89,11 +90,15 @@ Workspaces and session transcripts (`~/.claude/projects`, needed to resume)
 are kept. The host private key is readable by runs too (same UID).
 
 In single-user mode the agent user owns the Nix store: a run can make a store
-path writable and change it, and later runs that use that path get the change
-until the next start, which wipes the whole volume. The store is a cache for
-one pod's lifetime; runs between two starts are one trust domain. Nix's own
-binary is in the image and cannot be changed. A fresh store per run belongs
-with fresh pods per run.
+path writable and change it, or edit the database. At every start
+`nix-store-check` verifies the whole store with only the image's config: each
+path must be signed by cache.nixos.org (or be content-addressed) and match its
+recorded hash. Failing paths are deleted with everything that refers to them;
+unsigned paths are local builds and are rebuilt when needed. GC roots,
+profiles and entries the database does not know are removed. If the check
+cannot run, the store is wiped. Between two starts runs share the store, so
+they are one trust domain until fresh pods per run. Nix's own binary is in the
+image and cannot be changed.
 
 Config that arrives with a workspace (a repository's `.pi/`, `.claude/` or
 `AGENTS.md`) is part of that repository's trust, not reset here.

@@ -98,6 +98,7 @@ RUN for n in nix-build nix-collect-garbage nix-env nix-hash nix-instantiate \
     done \
  && nix --version
 COPY nix.conf /etc/nix/nix.conf
+COPY nix-store-check.sh /usr/local/bin/nix-store-check
 # The mount point for the store volume; owned by the agent user so a local
 # `docker run` without the volume works too.
 RUN mkdir -m 755 /nix && chown 1000:1000 /nix
