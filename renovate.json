@@ -22,6 +22,16 @@
         "@earendil-works/pi-coding-agent"
       ],
       "enabled": false
+    },
+    {
+      "description": "nixos/nix only fetches the static Nix binary (NIX_STATIC in runner/Dockerfile, a store path); bump the two together by hand.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "nixos/nix"
+      ],
+      "enabled": false
     }
   ]
 }

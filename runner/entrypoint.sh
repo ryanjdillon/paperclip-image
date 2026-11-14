@@ -10,6 +10,12 @@
 # per run. Paths are removed with rm -rf, so a planted
 # directory or symlink cannot stop the runner from starting. pi's providers
 # (~/.pi/agent/models.json) are then re-seeded from the deployment's mount.
+#
+# Nix: the store (/nix, its own volume) persists; it is content-addressed and
+# every run's toolchains come from it. The user's Nix config, registry,
+# profiles and fetcher cache are reset: a planted nix.conf or registry entry
+# could point later runs at another cache or flake, and nothing needs a
+# profile (`nix develop` does not use one, and none is on PATH).
 set -eu
 
 keys=${KEYS_DIR:-/keys}
@@ -46,7 +52,13 @@ for path in \
   .claude/output-styles \
   .claude/hooks \
   .pi \
-  .agents
+  .agents \
+  .config/nix \
+  .nix-profile \
+  .nix-defexpr \
+  .nix-channels \
+  .local/state/nix \
+  .cache/nix
 do
   rm -rf "${HOME:?}/$path"
 done
@@ -77,6 +89,22 @@ if [ -r "$pi_models" ]; then
   install -m 600 "$pi_models" "$HOME/.pi/agent/models.json"
 else
   echo "entrypoint: no pi models at $pi_models; pi knows only its built-in providers" >&2
+fi
+
+# The Nix store: usable only when /nix is a volume this user owns (the
+# Deployment's initContainer chowns it). When it has grown past
+# NIX_STORE_GC_MB, collect garbage in the background so sshd starts at once;
+# no run holds a GC root, so this keeps only what a running build is using.
+if [ -d /nix ] && [ -w /nix ]; then
+  (
+    used=$(du -sm /nix/store 2>/dev/null | cut -f1)
+    if [ "${used:-0}" -gt "${NIX_STORE_GC_MB:-40000}" ]; then
+      echo "entrypoint: nix store is ${used} MiB; collecting garbage" >&2
+      nice nix store gc >/dev/null 2>&1 || echo "entrypoint: nix store gc failed" >&2
+    fi
+  ) &
+else
+  echo "entrypoint: /nix is not a writable volume; nix is unavailable" >&2
 fi
 
 mkdir -m 700 "$HOME/.ssh"
