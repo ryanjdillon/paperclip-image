@@ -7,3 +7,7 @@
 	defaultBranch = main
 [push]
 	autoSetupRemote = true
+# Paperclip's server may clone over https (no credentials on the runner); push
+# over SSH instead, which uses the deploy key.
+[url "git@github.com:ryanjdillon/skrap"]
+	pushInsteadOf = https://github.com/ryanjdillon/skrap
