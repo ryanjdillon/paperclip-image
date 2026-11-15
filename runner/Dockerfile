@@ -128,6 +128,18 @@ RUN groupmod -g 20100 node \
 # `docker run` without the volume works too.
 RUN mkdir -m 755 /nix && chown 20100:20100 /nix
 
+# env/printenv print variable names only when listing (env-names.sh); running
+# a command through env is unchanged. The build checks both.
+COPY env-names.sh /usr/local/bin/env
+COPY printenv-names.sh /usr/local/bin/printenv
+RUN SHIM_TEST="$(printf 'secret\nline')" \
+ && export SHIM_TEST \
+ && /usr/local/bin/env | grep -qx SHIM_TEST \
+ && ! /usr/local/bin/env | grep -q secret \
+ && [ "$(/usr/local/bin/env A=ok sh -c 'echo "$A"')" = ok ] \
+ && [ "$(/usr/local/bin/env -i B=ok /bin/sh -c 'echo "$B"')" = ok ] \
+ && [ "$(/usr/local/bin/printenv SHIM_TEST)" = "SHIM_TEST set" ] \
+ && ! /usr/local/bin/printenv NOT_SET_HERE >/dev/null
 COPY sshd_config /etc/ssh/sshd_config
 # git over SSH to GitHub on port 443, with pinned host keys; the deploy key
 # comes from the deployment (/run/secrets/git/skrap/key).

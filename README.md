@@ -60,6 +60,13 @@ path to the server.
   without starting pi. pi started from inside a pi run skips the cap. It is
   cooperative: an agent on the runner can get around it, and the upstream's
   own limit is the hard one.
+- `env` and `printenv` (`/usr/local/bin`) print variable names only when
+  listing; `env NAME=VALUE cmd` runs commands unchanged, and `printenv NAME`
+  answers "set" or "unset". A run's environment holds its Paperclip API key
+  and the agent's private key, and printing them ends the run at the gateway's
+  scan gate. `/usr/bin/env`, `set`, `export -p`, `declare -p` and
+  `/proc/self/environ` still show values: this stops the common accident, not
+  a determined agent.
 - git to GitHub over SSH on port 443 (`ssh.github.com`, since egress is
   HTTPS only): `/etc/ssh/ssh_config.d/github.conf` uses a deploy key mounted
   at `/run/secrets/git/skrap/key` and GitHub's host keys pinned in

@@ -7,7 +7,9 @@
 	defaultBranch = main
 [push]
 	autoSetupRemote = true
-# Paperclip's server may clone over https (no credentials on the runner); push
-# over SSH instead, which uses the deploy key.
+# skrap is cloned, fetched and pushed as https://github.com/ryanjdillon/skrap
+# (the runner has no https credentials) and git uses SSH with the deploy key.
+# Agents see only the https form: pi's redactor rewrites `git@github.com` as
+# an email address.
 [url "git@github.com:ryanjdillon/skrap"]
-	pushInsteadOf = https://github.com/ryanjdillon/skrap
+	insteadOf = https://github.com/ryanjdillon/skrap
