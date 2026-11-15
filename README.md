@@ -50,6 +50,16 @@ path to the server.
   where Paperclip runs it without per-run config (its environment test).
 - Agent CLIs: Claude Code and pi (`pi_local`, run offline: no version
   checks, telemetry or tool downloads).
+- pi runs through a slot cap (`/usr/local/bin/pi`, `runner/pi-slot.sh`): at
+  most N pi processes at once on the runner, N from `max-concurrent` in the
+  pi mount (`/etc/paperclip-runner/pi/`), 1 to 16, default 2. The pi agents
+  share one gateway key, and its upstream allows only a few parallel
+  requests. A run that finds every slot busy waits, up to an hour, and the
+  wait counts against Paperclip's run and environment-test timeouts (the
+  test's hello probe allows 60 s). A waiter whose SSH session is gone exits
+  without starting pi. pi started from inside a pi run skips the cap. It is
+  cooperative: an agent on the runner can get around it, and the upstream's
+  own limit is the hard one.
 - Base tools: git, curl, jq, python3 (with venv), make, unzip, less, file,
   xz, ripgrep and fd. Anything more comes from the repository's own flake.
 - Nix (single-user, static binary at `/usr/local/bin/nix`, flakes on): mount
