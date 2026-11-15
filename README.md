@@ -60,6 +60,11 @@ path to the server.
   without starting pi. pi started from inside a pi run skips the cap. It is
   cooperative: an agent on the runner can get around it, and the upstream's
   own limit is the hard one.
+- git to GitHub over SSH on port 443 (`ssh.github.com`, since egress is
+  HTTPS only): `/etc/ssh/ssh_config.d/github.conf` uses a deploy key mounted
+  at `/run/secrets/git/skrap/key` and GitHub's host keys pinned in
+  `/etc/ssh/github_known_hosts`. Commits are made as "dillonteknisk agents"
+  (`/etc/gitconfig`).
 - Base tools: git, curl, jq, python3 (with venv), make, unzip, less, file,
   xz, ripgrep and fd. Anything more comes from the repository's own flake.
 - Nix (single-user, static binary at `/usr/local/bin/nix`, flakes on): mount

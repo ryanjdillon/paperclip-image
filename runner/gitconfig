@@ -1,0 +1,9 @@
+# System git config (/etc/gitconfig): the agents' commit identity. ~/.gitconfig
+# is reset at every start (entrypoint.sh).
+[user]
+	name = dillonteknisk agents
+	email = agents@dillonteknisk.no
+[init]
+	defaultBranch = main
+[push]
+	autoSetupRemote = true
