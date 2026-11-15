@@ -1,0 +1,13 @@
+# System git config (/etc/gitconfig): the agents' commit identity. ~/.gitconfig
+# is reset at every start (entrypoint.sh).
+[user]
+	name = dillonteknisk agents
+	email = agents@dillonteknisk.no
+[init]
+	defaultBranch = main
+[push]
+	autoSetupRemote = true
+# Paperclip's server may clone over https (no credentials on the runner); push
+# over SSH instead, which uses the deploy key.
+[url "git@github.com:ryanjdillon/skrap"]
+	pushInsteadOf = https://github.com/ryanjdillon/skrap

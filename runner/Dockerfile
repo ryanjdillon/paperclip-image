@@ -129,6 +129,16 @@ RUN groupmod -g 20100 node \
 RUN mkdir -m 755 /nix && chown 20100:20100 /nix
 
 COPY sshd_config /etc/ssh/sshd_config
+# git over SSH to GitHub on port 443, with pinned host keys; the deploy key
+# comes from the deployment (/run/secrets/git/skrap/key).
+COPY ssh_config_github.conf /etc/ssh/ssh_config.d/github.conf
+COPY github_known_hosts /etc/ssh/github_known_hosts
+COPY gitconfig /etc/gitconfig
+RUN grep -q '^Include /etc/ssh/ssh_config.d/\*.conf' /etc/ssh/ssh_config \
+ && ssh -G github.com | grep -qx 'port 443' \
+ && ssh -G github.com | grep -qx 'hostname ssh.github.com' \
+ && ssh -G github.com | grep -qx 'hostkeyalias github.com' \
+ && ssh -G github.com | grep -qx 'stricthostkeychecking true'
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # sshd runs as the image's node user, so it can only ever log that user in.
