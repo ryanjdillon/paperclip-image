@@ -80,6 +80,18 @@ RUN npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}" \
  && npm cache clean --force \
  && pi --version \
  && rm -rf /root/.pi
+# A slot cap in front of pi (pi-slot.sh): at most `max-concurrent` pi runs at
+# once, because the pi agents share one gateway key.
+COPY pi-slot.sh /tmp/pi-slot.sh
+RUN real=$(readlink -f /usr/local/bin/pi) \
+ && test -x "$real" \
+ && rm /usr/local/bin/pi \
+ && sed "s|@PI_REAL@|$real|" /tmp/pi-slot.sh >/usr/local/bin/pi \
+ && chmod 755 /usr/local/bin/pi \
+ && rm -rf /tmp/pi-slot.sh /tmp/pi-slots \
+ && ! grep -q @PI_REAL@ /usr/local/bin/pi \
+ && pi --version \
+ && rm -rf /tmp/pi-slots /root/.pi
 
 # Claude Code's managed settings take precedence over user and project ones:
 # only managed hooks run (none are defined), no self-update (it would install
