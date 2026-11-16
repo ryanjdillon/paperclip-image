@@ -38,8 +38,11 @@ path to the server.
   Otherwise the driver accepts any host key.
 - Claude Code's managed settings (`/etc/claude-code/managed-settings.json`)
   allow only managed hooks (none are defined), and turn off the self-updater
-  and non-essential traffic. MCP servers are limited to Paperclip's own (its
-  Service URL, or a loopback bridge): a repository's `.mcp.json` or
+  and non-essential traffic. MCP servers are limited to a loopback bridge
+  (`127.0.0.1`); Paperclip's own servers on its Service URL are denied, because
+  the runner's network policy blocks the server and Claude would fail to reach
+  them on every run (Paperclip attaches them to every run, with no setting to
+  turn them off). A repository's `.mcp.json` or
   `.claude/settings.json` cannot add or auto-approve others. That matters
   because Paperclip's `claude_local` agents run with
   `--setting-sources user,project`, so project settings apply. Agents cannot

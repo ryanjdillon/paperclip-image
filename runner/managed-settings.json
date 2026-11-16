@@ -4,12 +4,6 @@
   "allowManagedMcpServersOnly": true,
   "allowedMcpServers": [
     {
-      "serverUrl": "http://paperclip.paperclip.svc.cluster.local:3100/api/mcp/*"
-    },
-    {
-      "serverUrl": "http://paperclip.paperclip.svc.cluster.local:3100/mcp/*"
-    },
-    {
       "serverUrl": "http://127.0.0.1:*/api/mcp/*"
     },
     {
@@ -19,5 +13,10 @@
   "env": {
     "DISABLE_AUTOUPDATER": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
-  }
+  },
+  "deniedMcpServers": [
+    {
+      "serverUrl": "http://paperclip.paperclip.svc.cluster.local:3100/*"
+    }
+  ]
 }
