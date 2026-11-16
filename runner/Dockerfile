@@ -128,6 +128,37 @@ RUN groupmod -g 20100 node \
 # `docker run` without the volume works too.
 RUN mkdir -m 755 /nix && chown 20100:20100 /nix
 
+# env/printenv print variable names only when listing (env-names.sh); running
+# a command through env is unchanged. They live in their own directory
+# (PAPERCLIP_SHIM_DIR, profile.sh), linked from /usr/local/bin, so a dev shell
+# that puts its own coreutils first on PATH can put them back in front. The
+# build checks the listing, pass-through and option-parsing paths.
+COPY --chmod=755 env-names.sh /usr/local/lib/paperclip-shims/env
+COPY --chmod=755 printenv-names.sh /usr/local/lib/paperclip-shims/printenv
+RUN ln -s /usr/local/lib/paperclip-shims/env /usr/local/bin/env \
+ && ln -s /usr/local/lib/paperclip-shims/printenv /usr/local/bin/printenv \
+ && SHIM_TEST="$(printf 'secret\nline')" \
+ && export SHIM_TEST \
+ && e=/usr/local/bin/env \
+ && $e | grep -qx SHIM_TEST \
+ && ! $e | grep -q secret \
+ && ! $e | grep -qx line \
+ && [ "$($e A=ok sh -c 'echo "$A"')" = ok ] \
+ && [ "$($e -i B=ok /bin/sh -c 'echo "$B"')" = ok ] \
+ && [ "$($e -iu X C=ok /bin/sh -c 'echo "$C"')" = ok ] \
+ && [ "$($e -vC / sh -c pwd 2>/dev/null)" = / ] \
+ && [ "$($e -vS'sh -c pwd' 2>/dev/null)" = "$(pwd)" ] \
+ && [ "$($e --uns=HOME sh -c 'echo "${HOME:-none}"')" = none ] \
+ && [ "$($e --ch / sh -c pwd)" = / ] \
+ && $e -0u HOME | grep -qx SHIM_TEST \
+ && ! $e -0u HOME | grep -q secret \
+ && $e --version | grep -q coreutils \
+ && { $e --bogus >/dev/null 2>&1; [ $? -eq 125 ]; } \
+ && [ "$(/usr/local/bin/printenv SHIM_TEST)" = "SHIM_TEST set" ] \
+ && ! /usr/local/bin/printenv NOT_SET_HERE >/dev/null \
+ && /usr/local/bin/printenv | grep -qx SHIM_TEST \
+ && ! /usr/local/bin/printenv | grep -q secret \
+ && [ "$(sh -lc 'command -v env')" = /usr/local/bin/env ]
 COPY sshd_config /etc/ssh/sshd_config
 # git over SSH to GitHub on port 443, with pinned host keys; the deploy key
 # comes from the deployment (/run/secrets/git/skrap/key).

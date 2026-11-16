@@ -19,3 +19,6 @@ export NIX_USER_CONF_FILES=
 # Python: no user site-packages, so a .pth file a run leaves in
 # ~/.local/lib/python3.*/site-packages cannot run code in later runs.
 export PYTHONNOUSERSITE=1
+# env/printenv that list names only (env-names.sh); a dev shell that puts its
+# own coreutils first on PATH re-prepends this directory (skrap's flake does).
+export PAPERCLIP_SHIM_DIR=/usr/local/lib/paperclip-shims
