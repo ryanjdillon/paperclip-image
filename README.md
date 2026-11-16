@@ -38,11 +38,12 @@ path to the server.
   Otherwise the driver accepts any host key.
 - Claude Code's managed settings (`/etc/claude-code/managed-settings.json`)
   allow only managed hooks (none are defined), and turn off the self-updater
-  and non-essential traffic. MCP servers are limited to a loopback bridge
-  (`127.0.0.1`); Paperclip's own servers on its Service URL are denied, because
-  the runner's network policy blocks the server and Claude would fail to reach
-  them on every run (Paperclip attaches them to every run, with no setting to
-  turn them off). A repository's `.mcp.json` or
+  and non-essential traffic. `allowManagedMcpServersOnly` with an allowlist of
+  loopback bridges (`127.0.0.1`) is what keeps every other MCP server out.
+  Paperclip's own servers on its Service URL are also on the deny list, because
+  the runner's network policy blocks the server and Claude would otherwise fail
+  to reach them on every run (Paperclip attaches them to every run, with no
+  setting to turn them off). A repository's `.mcp.json` or
   `.claude/settings.json` cannot add or auto-approve others. That matters
   because Paperclip's `claude_local` agents run with
   `--setting-sources user,project`, so project settings apply. Agents cannot
@@ -63,9 +64,13 @@ path to the server.
   without starting pi. pi started from inside a pi run skips the cap. It is
   cooperative: an agent on the runner can get around it, and the upstream's
   own limit is the hard one.
-- `env` and `printenv` (`/usr/local/bin`) print variable names only when
-  listing; `env NAME=VALUE cmd` runs commands unchanged, and `printenv NAME`
-  answers "set" or "unset". A run's environment holds its Paperclip API key
+- `env` and `printenv` (`/usr/local/lib/paperclip-shims`, linked from
+  `/usr/local/bin`) print variable names only when listing; `env NAME=VALUE
+  cmd`, `--help` and `--version` pass through unchanged, and `printenv NAME`
+  answers "set" or "unset" (an empty value counts as set). `nix develop` puts
+  its own coreutils first on PATH, so a repository's dev shell has to
+  re-prepend `$PAPERCLIP_SHIM_DIR` (exported by `/etc/profile.d`; skrap's flake
+  does). A run's environment holds its Paperclip API key
   and the agent's private key, and printing them ends the run at the gateway's
   scan gate. `/usr/bin/env`, `set`, `export -p`, `declare -p` and
   `/proc/self/environ` still show values: this stops the common accident, not

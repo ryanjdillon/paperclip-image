@@ -10,6 +10,8 @@
 # skrap is cloned, fetched and pushed as https://github.com/ryanjdillon/skrap
 # (the runner has no https credentials) and git uses SSH with the deploy key.
 # Agents see only the https form: pi's redactor rewrites `git@github.com` as
-# an email address.
+# an email address. insteadOf is a prefix match, so it covers skrap and
+# skrap.git only; other https GitHub URLs are untouched (and the deploy key
+# reaches no other repo anyway).
 [url "git@github.com:ryanjdillon/skrap"]
 	insteadOf = https://github.com/ryanjdillon/skrap
