@@ -26,7 +26,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: ryanjdillon/workflows/.github/workflows/docker-build-push.yml@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
+    uses: ryanjdillon/workflows/.github/workflows/docker-build-push.yml@5a8a9389d9ff1826df8b4ab8d8a0cce3936693a4 # v1.2.0
     with:
       image: ryanjdillon/paperclip-agent-runner
       context: runner
