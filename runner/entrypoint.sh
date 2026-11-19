@@ -92,11 +92,16 @@ fi
 # gateway provider must be in pi's own config dir, because Paperclip's
 # environment test (and the agent verification built on it) runs pi without
 # the per-run config that PAPERCLIP_PI_PROVIDERS produces.
+# A symlink, not a copy: the mount is a ConfigMap directory that the kubelet
+# updates in place, and pi reads models.json at every start, so a changed
+# model list reaches the next run without restarting the runner (DIL-933).
+# Nothing writes this file (pi only reads it; Paperclip writes its own copy
+# elsewhere, and only with PAPERCLIP_PI_PROVIDERS). The file holds no secret.
 # PI_MODELS_FILE overrides the path (local tests).
 pi_models=${PI_MODELS_FILE:-/etc/paperclip-runner/pi/models.json}
 if [ -r "$pi_models" ]; then
   mkdir -p -m 700 "$HOME/.pi" "$HOME/.pi/agent"
-  install -m 600 "$pi_models" "$HOME/.pi/agent/models.json"
+  ln -sfn "$pi_models" "$HOME/.pi/agent/models.json"
 else
   echo "entrypoint: no pi models at $pi_models; pi knows only its built-in providers" >&2
 fi
