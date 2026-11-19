@@ -48,10 +48,13 @@ path to the server.
   because Paperclip's `claude_local` agents run with
   `--setting-sources user,project`, so project settings apply. Agents cannot
   override managed settings.
-- pi providers: a `models.json` mounted at
-  `/etc/paperclip-runner/pi/models.json` is copied to `~/.pi/agent/` on start
-  (after the reset), so pi knows custom providers, e.g. the AI gateway, even
-  where Paperclip runs it without per-run config (its environment test).
+- pi providers: `~/.pi/agent/models.json` is a symlink, made on start (after
+  the reset), to the `models.json` mounted at
+  `/etc/paperclip-runner/pi/models.json`, so pi knows custom providers, e.g.
+  the AI gateway, even where Paperclip runs it without per-run config (its
+  environment test). Mount it as a ConfigMap directory (no `subPath`): the
+  kubelet updates the file in place, and the next pi process reads the new
+  list, so model changes need no runner restart.
 - Agent CLIs: Claude Code and pi (`pi_local`, run offline: no version
   checks, telemetry or tool downloads).
 - pi runs through a slot cap (`/usr/local/bin/pi`, `runner/pi-slot.sh`): at
