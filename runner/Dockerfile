@@ -34,6 +34,9 @@ RUN nix-store --realise "$NIX_STATIC" \
  && echo "$NIX_STATIC_SHA256  /nix-static" | sha256sum -c - \
  && /nix-static --version
 
+# Debian 13: Paperclip's own runner needs glibc 2.39 or newer on the
+# execution host (PAPERCLIP_RUNNER_MINIMUM_GLIBC_VERSION in
+# packages/shared/src/agent-runner.ts). Debian 12 has 2.36.
 FROM node:24-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0
 
 # ripgrep and fd (Debian's fdfind, which pi also looks for): for agent CLIs
