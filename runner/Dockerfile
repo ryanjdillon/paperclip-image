@@ -34,7 +34,7 @@ RUN nix-store --realise "$NIX_STATIC" \
  && echo "$NIX_STATIC_SHA256  /nix-static" | sha256sum -c - \
  && /nix-static --version
 
-FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
+FROM node:24-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0
 
 # ripgrep and fd (Debian's fdfind, which pi also looks for): for agent CLIs
 # that want system rg/fd (pi's grep and find tools; Claude Code bundles its own
