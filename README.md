@@ -80,6 +80,33 @@ The runner itself:
   list, so model changes need no runner restart.
 - Agent CLIs: Claude Code and pi (`pi_local`, run offline: no version
   checks, telemetry or tool downloads).
+- Google Antigravity's ACP server (`agy-acp`, `runner/agy-acp.sh`), for a
+  `gemini_local` agent with `agentCommand: agy-acp`. It uses a Google sign-in
+  (a Gemini subscription), so it needs no API key. Every agent on the runner
+  shares one user, so the real Google token stays in the `agy-broker` sidecar
+  (`runner/agy-broker`), which runs from this image with
+  `node /usr/local/lib/agy-broker/agy-broker.mjs` on `127.0.0.1:8787`. It
+  reads `token.json`, `tls.key` and `tls.crt` from
+  `/run/secrets/agy-broker/`. `agy-acp` needs the broker's CA at
+  `/etc/paperclip-runner/agy/ca.crt`. On every start it writes the broker's
+  dummy credentials and `{"auth": {"type": "oauth-personal"}}` to
+  `$GEMINI_HOME/antigravity-acp/`, and sends the server's traffic through the
+  broker. The broker terminates TLS for `oauth2.googleapis.com` and the two
+  `cloudcode-pa` hosts only, swaps the dummy token for the real one, and
+  refuses anything else to those hosts. It tunnels other hosts unchanged. An
+  agent can still send prompts through the broker, but it cannot read the
+  real token or reach other Google APIs.
+  - `GEMINI_HOME` defaults to `/home/node/.antigravity`. It must not be under
+    `HOME`, because Paperclip points `HOME` at a new directory for each remote
+    run. The server keeps transcripts and conversation databases there, so
+    that directory grows.
+  - The server ignores the agent's model (Paperclip sends it as
+    `GEMINI_MODEL`). Set `AGY_ACP_DEFAULT_MODEL` in the agent's env instead,
+    for example `gemini-4-neon-high`.
+  - If the broker cannot refresh the real token, model calls fail with HTTP
+    502. A missing `settings.json` or token file would make the server wait
+    for a browser sign-in until the run times out. `agy-acp` writes both
+    before every start to prevent that.
 - pi runs through a slot cap (`/usr/local/bin/pi`, `runner/pi-slot.sh`): at
   most N pi processes at once on the runner, N from `max-concurrent` in the
   pi mount (`/etc/paperclip-runner/pi/`), 1 to 16, default 2. The pi agents

@@ -104,6 +104,39 @@ RUN real=$(readlink -f /usr/local/bin/pi) \
  && pi --version \
  && rm -rf /tmp/pi-slots /root/.pi
 
+# Google Antigravity's ACP server (DIL-963), for gemini_local agents with
+# agentCommand `agy-acp` (runner/agy-acp.sh). The URL and the archive sha256
+# are the linux-x64 pins in Paperclip 2026.1117.0
+# (packages/paperclip-runner/antigravity-distributions.json). Paperclip marks
+# this build inventory-only and does not run it itself. The server links only
+# against glibc, and localharness_external is static. Unpacked, it is about
+# 1 GB. The build does not start it: its tcmalloc aborts at start when it
+# cannot count the CPUs, as in the BuildKit sandbox. It starts in a container.
+ARG AGY_ACP_VERSION=1.4.3
+ARG AGY_ACP_SHA256=0634ce5306ba92c932945455e7a83fda78e2d99c33fa8aa6ee0566206a382714
+COPY agy-acp.sh /tmp/agy-acp.sh
+RUN dir="/opt/antigravity/${AGY_ACP_VERSION}" \
+ && curl -fsSL -o /tmp/agy.zip \
+      "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-${AGY_ACP_VERSION}-linux-x86_64.zip" \
+ && echo "${AGY_ACP_SHA256}  /tmp/agy.zip" | sha256sum -c - \
+ && mkdir -p "$dir" \
+ && unzip -q /tmp/agy.zip -d "$dir" \
+ && rm /tmp/agy.zip \
+ && chmod -R go-w,a+rX /opt/antigravity \
+ && test -x "$dir/agy_acp_server.par" \
+ && test -x "$dir/localharness_external" \
+ && sed "s|@AGY_REAL@|$dir/agy_acp_server.par|" /tmp/agy-acp.sh >/usr/local/bin/agy-acp \
+ && chmod 755 /usr/local/bin/agy-acp \
+ && rm /tmp/agy-acp.sh \
+ && ! grep -q @AGY_REAL@ /usr/local/bin/agy-acp
+# The token broker for agy-acp (runner/agy-broker), run as a sidecar from this
+# image. Its tests run here, because this is the image's only build step.
+COPY agy-broker /usr/local/lib/agy-broker
+RUN cd /usr/local/lib/agy-broker \
+ && node --test agy-broker.test.mjs \
+ && rm agy-broker.test.mjs \
+ && chmod -R go-w,a+rX /usr/local/lib/agy-broker
+
 # The provider pack (about 2.7 GB) and the daemon, root-owned and not writable
 # by the agent user. Only then does the daemon report the pack as protected
 # ("immutable"), and a protected pack keeps working across compatible server
