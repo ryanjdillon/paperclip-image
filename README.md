@@ -57,6 +57,11 @@ The runner itself:
   allow only managed hooks (none are defined), and turn off the self-updater
   and non-essential traffic. `allowManagedMcpServersOnly` with an allowlist of
   loopback bridges (`127.0.0.1`) is what keeps every other MCP server out.
+  The ACP runner's tool bridge listens at `http://127.0.0.1:<port>/mcp`, with
+  no path after `/mcp`. A pattern that ends in `/mcp/*` does not match it, so
+  the list also has the exact `/mcp` path. Without it, Claude drops the bridge
+  and has no `paperclip_finish` tool (Paperclip 2026.1117.0,
+  `packages/paperclip-runner/src/drivers/runner-tool-bridge.ts:214`).
   Paperclip's own servers on its Service URL are also on the deny list, because
   the runner's network policy blocks the server and Claude would otherwise fail
   to reach them on every run (Paperclip attaches them to every run, with no
