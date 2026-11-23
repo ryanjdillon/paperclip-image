@@ -8,6 +8,9 @@
     },
     {
       "serverUrl": "http://127.0.0.1:*/mcp/*"
+    },
+    {
+      "serverUrl": "http://127.0.0.1:*/mcp"
     }
   ],
   "env": {
