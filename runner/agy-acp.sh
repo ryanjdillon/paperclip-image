@@ -8,7 +8,9 @@
 # Paperclip runs come in over SSH, so they do not see the container's
 # environment: the defaults below are the deployment's fixed paths.
 # GEMINI_HOME is fixed too, because Paperclip points HOME at a new directory
-# for each remote run. The server keeps transcripts there, so it grows.
+# for each remote run. Every agent on the runner shares one user, so every
+# agent can read and change this directory, transcripts included, also while
+# a server runs. It holds no secret.
 # Installed as /usr/local/bin/agy-acp by the Dockerfile, which fills in the
 # real server.
 set -eu
@@ -26,22 +28,26 @@ fi
 umask 077
 state="$GEMINI_HOME/antigravity-acp"
 mkdir -p "$state"
+token_tmp="$state/.acp_token.json.$$"
+settings_tmp="$state/.settings.json.$$"
+bundle="$GEMINI_HOME/ca-bundle.crt"
+bundle_tmp="$bundle.$$"
+trap 'rm -f "$token_tmp" "$settings_tmp" "$bundle_tmp"' EXIT
 
-# Rewritten on every start, so a changed file cannot steer a later run. The
-# files hold no secret: the broker serves dummy tokens and public client IDs.
-tmp="$state/.acp_token.json.$$"
-if ! curl -fsS --max-time 10 "$broker/dummy-credentials" >"$tmp"; then
-  rm -f "$tmp"
+# Rewritten before every start, so that the server starts from known files:
+# a missing or changed token file or setting makes the server wait for a
+# browser sign-in until the run times out. The files hold no secret: the
+# broker serves dummy tokens and public client IDs.
+if ! curl -fsS --max-time 10 "$broker/dummy-credentials" >"$token_tmp"; then
   echo "agy-acp: the broker at $broker does not answer" >&2
   exit 69
 fi
-mv -f "$tmp" "$state/acp_token.json"
-printf '{"auth":{"type":"oauth-personal"}}\n' >"$state/.settings.json.$$"
-mv -f "$state/.settings.json.$$" "$state/settings.json"
-
-bundle="$GEMINI_HOME/ca-bundle.crt"
-cat /etc/ssl/certs/ca-certificates.crt "$ca" >"$bundle.$$"
-mv -f "$bundle.$$" "$bundle"
+mv -f "$token_tmp" "$state/acp_token.json"
+printf '{"auth":{"type":"oauth-personal"}}\n' >"$settings_tmp"
+mv -f "$settings_tmp" "$state/settings.json"
+cat /etc/ssl/certs/ca-certificates.crt "$ca" >"$bundle_tmp"
+mv -f "$bundle_tmp" "$bundle"
+trap - EXIT
 
 AGY_ACP_FORCE_FILE_STORAGE=1
 HTTPS_PROXY=$broker
@@ -53,4 +59,7 @@ SSL_CERT_FILE=$bundle
 REQUESTS_CA_BUNDLE=$bundle
 export GEMINI_HOME AGY_ACP_FORCE_FILE_STORAGE HTTPS_PROXY https_proxy NO_PROXY \
   no_proxy HTTPLIB2_CA_CERTS SSL_CERT_FILE REQUESTS_CA_BUNDLE
+# --uid= is the argument list that Paperclip pins for the linux builds
+# (antigravity-distributions.json). Google does not document it; keep it
+# with the pin.
 exec "$real" --uid= "$@"

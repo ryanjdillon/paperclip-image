@@ -19,6 +19,8 @@ import http from "node:http";
 import net from "node:net";
 import tls from "node:tls";
 import { readFileSync } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 
 export const DUMMY_REFRESH_TOKEN = "agy-broker-dummy-refresh-token";
@@ -26,10 +28,34 @@ export const DUMMY_ACCESS_TOKEN = "agy-broker-dummy-access-token";
 export const OAUTH_HOST = "oauth2.googleapis.com";
 export const CCPA_HOSTS = new Set(["cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com"]);
 export const TERMINATED_HOSTS = new Set([OAUTH_HOST, ...CCPA_HOSTS]);
+// agy's largest requests carry a conversation; 16 MiB is far above them and
+// keeps one agent from exhausting the sidecar's memory.
+export const MAX_BODY_BYTES = 16 * 1024 * 1024;
 const TOKEN_URI = "https://oauth2.googleapis.com/token";
-const HOP_BY_HOP = ["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te", "trailer", "host", "content-length"];
+// Hop-by-hop headers, headers that fetch sets itself, and headers that must
+// not reach Google.
+const STRIPPED_HEADERS = [
+  "connection", "keep-alive", "proxy-connection", "proxy-authorization", "transfer-encoding",
+  "upgrade", "te", "trailer", "host", "content-length", "accept-encoding",
+];
 
 const log = (...parts) => console.log("[agy-broker]", ...parts);
+
+/**
+ * The upstream URL for a request on a CCPA host, or null. The check runs on
+ * the URL that fetch will send, after dot segments are resolved, so that
+ * "/v1internal/../v1/..." cannot leave v1internal. Encoded dots, slashes and
+ * backslashes are refused outright: agy does not send them.
+ */
+export function upstreamUrl(host, rawPath) {
+  if (!CCPA_HOSTS.has(host) || typeof rawPath !== "string" || !rawPath.startsWith("/")) return null;
+  if (/\.\.|%2e|%2f|%5c|\\/i.test(rawPath)) return null;
+  const origin = `https://${host}`;
+  let url;
+  try { url = new URL(rawPath, origin); } catch { return null; }
+  if (url.origin !== origin || !/^\/v1internal[:/]/.test(url.pathname)) return null;
+  return url.href;
+}
 
 /** Decides what to do with one request on a terminated host. */
 export function route({ host, method, path, authorization, form }) {
@@ -41,8 +67,9 @@ export function route({ host, method, path, authorization, form }) {
   }
   if (CCPA_HOSTS.has(host)) {
     if (authorization !== `Bearer ${DUMMY_ACCESS_TOKEN}`) return { action: "deny", reason: "not the dummy bearer" };
-    if (!/^\/v1internal[:/]/.test(path)) return { action: "deny", reason: "not a v1internal path" };
-    return { action: "forward" };
+    const url = upstreamUrl(host, path);
+    if (!url) return { action: "deny", reason: "not a v1internal path" };
+    return { action: "forward", url };
   }
   return { action: "deny", reason: "host not terminated" };
 }
@@ -87,7 +114,8 @@ export function createTokenSource({ readToken, fetchImpl = fetch, now = Date.now
       refreshToken = body.refresh_token;
       log("Google rotated the refresh token; the new one is kept in memory only");
     }
-    cached = { token: body.access_token, expiresAt: now() + Number(body.expires_in ?? 3600) * 1000 };
+    const lifetime = Number(body.expires_in);
+    cached = { token: body.access_token, expiresAt: now() + (Number.isFinite(lifetime) && lifetime > 0 ? lifetime : 3600) * 1000 };
     return cached.token;
   }
   return async function accessToken() {
@@ -97,22 +125,33 @@ export function createTokenSource({ readToken, fetchImpl = fetch, now = Date.now
   };
 }
 
+class BodyTooLarge extends Error {}
+
 async function readBody(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) throw new BodyTooLarge();
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks);
 }
 
-export function createBroker({ tokenFile, tlsKey, tlsCert, fetchImpl = fetch }) {
-  const readToken = () => JSON.parse(readFileSync(tokenFile, "utf8"));
-  const accessToken = createTokenSource({ readToken, fetchImpl });
-  const tlsOptions = { key: readFileSync(tlsKey), cert: readFileSync(tlsCert), ALPNProtocols: ["http/1.1"] };
-
-  const terminated = http.createServer(async (req, res) => {
+/** The HTTP server for requests on terminated hosts. socket.agyHost names the host. */
+export function createTerminatedServer({ accessToken, fetchImpl = fetch }) {
+  return http.createServer(async (req, res) => {
     const host = req.socket.agyHost;
     const path = req.url ?? "/";
+    const abort = new AbortController();
+    res.on("close", () => abort.abort());
     try {
-      const body = await readBody(req);
+      let body;
+      try { body = await readBody(req); } catch (error) {
+        if (!(error instanceof BodyTooLarge)) throw error;
+        log(host, req.method, "deny body too large");
+        res.writeHead(413, { connection: "close" }); res.end(); return;
+      }
       const decision = route({
         host, method: req.method, path,
         authorization: req.headers.authorization,
@@ -127,32 +166,43 @@ export function createBroker({ tokenFile, tlsKey, tlsCert, fetchImpl = fetch }) 
         return;
       }
       const headers = { ...req.headers, authorization: `Bearer ${await accessToken()}` };
-      for (const name of [...HOP_BY_HOP, "accept-encoding"]) delete headers[name];
-      const upstream = await fetchImpl(`https://${host}${path}`, {
+      for (const name of STRIPPED_HEADERS) delete headers[name];
+      const upstream = await fetchImpl(decision.url, {
         method: req.method,
         headers,
         body: ["GET", "HEAD"].includes(req.method) ? undefined : body,
+        // A redirect would carry the real token past route(); agy gets it instead.
+        redirect: "manual",
+        signal: abort.signal,
       });
       const out = {};
       upstream.headers.forEach((value, name) => {
-        if (!HOP_BY_HOP.includes(name) && name !== "content-encoding") out[name] = value;
+        if (!STRIPPED_HEADERS.includes(name) && name !== "content-encoding") out[name] = value;
       });
       res.writeHead(upstream.status, out);
-      if (upstream.body) for await (const chunk of upstream.body) res.write(chunk);
-      res.end();
+      if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), res);
+      else res.end();
     } catch (error) {
+      if (abort.signal.aborted) return;
       log(host, req.method, path.split("?")[0], "error:", error.message);
-      if (!res.headersSent) res.writeHead(502);
-      res.end();
+      // After the headers, only a reset tells agy that the stream is incomplete.
+      if (res.headersSent) { res.destroy(); return; }
+      res.writeHead(502); res.end();
     }
   });
+}
+
+export function createBroker({ readToken, tlsOptions, fetchImpl = fetch }) {
+  const accessToken = createTokenSource({ readToken, fetchImpl });
+  const terminated = createTerminatedServer({ accessToken, fetchImpl });
 
   const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/healthz") { res.writeHead(200); res.end("ok\n"); return; }
     if (req.method === "GET" && req.url === "/dummy-credentials") {
       try {
+        const credentials = dummyCredentials(readToken());
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(`${JSON.stringify(dummyCredentials(readToken()))}\n`);
+        res.end(`${JSON.stringify(credentials)}\n`);
       } catch (error) {
         log("dummy-credentials error:", error.message);
         res.writeHead(500); res.end();
@@ -162,6 +212,8 @@ export function createBroker({ tokenFile, tlsKey, tlsCert, fetchImpl = fetch }) 
     res.writeHead(404); res.end();
   });
 
+  // Tunnels go to any host on 443, internal ones included. That gives an agent
+  // nothing new: the sidecar shares the pod's network and its NetworkPolicy.
   server.on("connect", (req, socket, head) => {
     const [host, portText] = (req.url ?? "").split(":");
     const port = Number(portText);
@@ -170,7 +222,7 @@ export function createBroker({ tokenFile, tlsKey, tlsCert, fetchImpl = fetch }) 
     if (TERMINATED_HOSTS.has(host)) {
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head?.length) socket.unshift(head);
-      const secure = new tls.TLSSocket(socket, { isServer: true, ...tlsOptions });
+      const secure = new tls.TLSSocket(socket, { isServer: true, ...tlsOptions, ALPNProtocols: ["http/1.1"] });
       secure.agyHost = host;
       secure.on("error", () => secure.destroy());
       terminated.emit("connection", secure);
@@ -186,17 +238,31 @@ export function createBroker({ tokenFile, tlsKey, tlsCert, fetchImpl = fetch }) 
     socket.on("close", () => upstream.destroy());
   });
 
+  server.shutdown = () => new Promise((resolve) => {
+    server.close(() => resolve());
+    server.closeAllConnections();
+    terminated.closeAllConnections();
+  });
   return server;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const port = Number(process.env.AGY_BROKER_PORT ?? 8787);
+  const tokenFile = process.env.AGY_BROKER_TOKEN_FILE ?? "/run/secrets/agy-broker/token.json";
   const server = createBroker({
-    tokenFile: process.env.AGY_BROKER_TOKEN_FILE ?? "/run/secrets/agy-broker/token.json",
-    tlsKey: process.env.AGY_BROKER_TLS_KEY ?? "/run/secrets/agy-broker/tls.key",
-    tlsCert: process.env.AGY_BROKER_TLS_CERT ?? "/run/secrets/agy-broker/tls.crt",
+    readToken: () => JSON.parse(readFileSync(tokenFile, "utf8")),
+    tlsOptions: {
+      key: readFileSync(process.env.AGY_BROKER_TLS_KEY ?? "/run/secrets/agy-broker/tls.key"),
+      cert: readFileSync(process.env.AGY_BROKER_TLS_CERT ?? "/run/secrets/agy-broker/tls.crt"),
+    },
   });
   // Loopback only: the runner's containers share the pod's network.
   server.listen(port, "127.0.0.1", () => log("listening on 127.0.0.1:" + port));
-  for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => server.close(() => process.exit(0)));
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.on(signal, () => {
+      // Long model streams would hold close() open past the grace period.
+      setTimeout(() => process.exit(0), 3000);
+      server.shutdown().then(() => process.exit(0));
+    });
+  }
 }

@@ -130,7 +130,8 @@ RUN dir="/opt/antigravity/${AGY_ACP_VERSION}" \
  && rm /tmp/agy-acp.sh \
  && ! grep -q @AGY_REAL@ /usr/local/bin/agy-acp
 # The token broker for agy-acp (runner/agy-broker), run as a sidecar from this
-# image. Its tests run here, because this is the image's only build step.
+# image. Its tests run here: CI only builds this image, so a failed test fails
+# the build.
 COPY agy-broker /usr/local/lib/agy-broker
 RUN cd /usr/local/lib/agy-broker \
  && node --test agy-broker.test.mjs \
