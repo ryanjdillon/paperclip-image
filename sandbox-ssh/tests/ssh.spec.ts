@@ -4,7 +4,17 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.js";
-import { buildRemoteScript, CredentialFiles, shellQuote, sshArgs, SshRunner } from "../src/ssh.js";
+import { MAX_TIMEOUT_MS } from "../src/config.js";
+import {
+  buildRemoteScript,
+  clampTimeout,
+  CredentialFiles,
+  MAX_OUTPUT_BYTES,
+  shellQuote,
+  sshArgs,
+  SshRunner,
+  TRUSTED_PATH,
+} from "../src/ssh.js";
 
 const config = parseConfig({
   host: "runner",
@@ -30,7 +40,19 @@ describe("buildRemoteScript", () => {
   });
 
   it("rounds the time limit up to whole seconds", () => {
-    expect(buildRemoteScript({ command: "x", timeoutMs: 1001 })).toContain("timeout --kill-after=10s 2s env 'x'");
+    expect(buildRemoteScript({ command: "x", timeoutMs: 1001 })).toContain("timeout --kill-after=10s 2s env -- 'x'");
+  });
+
+  it("reads no profile and sets a fixed PATH for housekeeping", () => {
+    const script = buildRemoteScript({ command: "rm", timeoutMs: 1000, profiles: false });
+    expect(script.startsWith(`PATH=${TRUSTED_PATH} && export PATH && `)).toBe(true);
+    expect(script.endsWith("; exit $?")).toBe(true);
+    expect(script).not.toContain(".profile");
+  });
+
+  it("clamps the time limit", () => {
+    expect(clampTimeout(10 ** 12)).toBe(MAX_TIMEOUT_MS);
+    expect(clampTimeout(0)).toBe(1);
   });
 });
 
@@ -119,6 +141,26 @@ describe("SshRunner", () => {
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).toBeNull();
   }, 10_000);
+
+  it("reports a timeout when the command ignores TERM", async () => {
+    const result = await runner.run(config, {
+      command: "sh",
+      args: ["-c", "trap '' TERM; sleep 30"],
+      timeoutMs: 1000,
+    });
+    expect(result.timedOut).toBe(true);
+  }, 20_000);
+
+  it("ends a command with too much output", async () => {
+    await expect(
+      runner.run(config, { command: "head", args: ["-c", String(MAX_OUTPUT_BYTES + 1), "/dev/zero"], timeoutMs: 5000 }),
+    ).rejects.toThrow(/bytes of output/);
+  });
+
+  it("runs a command whose name looks like an option", async () => {
+    const result = await runner.run(config, { command: "-S", timeoutMs: 5000 });
+    expect(result.exitCode).toBe(127);
+  });
 
   it("does not call a command that exits 124 at once a timeout", async () => {
     const result = await runner.run(config, { command: "sh", args: ["-c", "exit 124"], timeoutMs: 5000 });
