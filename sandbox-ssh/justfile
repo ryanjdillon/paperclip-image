@@ -1,0 +1,21 @@
+default:
+    @just --list
+
+# Typecheck, tests and dependency audit. CI runs this recipe.
+check: lint test audit
+
+# Typecheck the plugin.
+lint:
+    pnpm typecheck
+
+# Run the plugin's tests.
+test:
+    pnpm test
+
+# Check dependencies for known vulnerabilities.
+audit:
+    pnpm audit
+
+# Build the plugin into dist/.
+build:
+    pnpm build

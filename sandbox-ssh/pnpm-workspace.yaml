@@ -1,0 +1,8 @@
+# Dependency install scripts stay off; esbuild's only checks its binary, and
+# the build works without it.
+allowBuilds:
+  esbuild: false
+
+# vite pins an esbuild with a low-severity advisory (GHSA-g7r4-m6w7-qqqr).
+overrides:
+  esbuild: ^0.28.2
