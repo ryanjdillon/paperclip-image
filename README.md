@@ -174,7 +174,9 @@ settings, memory and extensions, its user-scope MCP servers, pi's user config
 (`~/.pi`, `~/.agents`), git's user config and `~/.npmrc`, Nix's user
 and nixpkgs config, registry, profiles and fetcher cache, Python's user
 site-packages and pip/uv config, and rebuilds `~/.ssh`; sshd never runs
-`~/.ssh/rc`. Python ignores user site-packages anyway (`PYTHONNOUSERSITE`).
+`~/.ssh/rc`. The agent user's login shell is dash, so sshd's `sh -c` reads
+no startup file: with bash, `~/.bashrc` ran before every SSH command. Python
+ignores user site-packages anyway (`PYTHONNOUSERSITE`).
 Workspaces and session transcripts (`~/.claude/projects`, needed to resume)
 are kept. The host private key is readable by runs too (same UID).
 

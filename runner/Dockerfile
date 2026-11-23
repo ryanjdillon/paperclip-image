@@ -186,9 +186,13 @@ RUN /usr/local/bin/nix-store-check --build /tmp/nix-store-check \
 # usually the first login user on the host whose disk backs the volumes.
 # 20100 is outside the usual ranges for system, login, subordinate (100000+)
 # and nixbld (30000+) IDs.
+# The login shell is dash, not bash: sshd runs every command through it, and
+# bash then runs ~/.bashrc first. Every run can write the home, so one run
+# could take over the commands of later runs. `dash -c` reads no file.
 RUN groupmod -g 20100 node \
- && usermod -u 20100 -g 20100 node \
- && test "$(id -u node):$(id -g node)" = 20100:20100
+ && usermod -u 20100 -g 20100 -s /bin/sh node \
+ && test "$(id -u node):$(id -g node)" = 20100:20100 \
+ && test "$(getent passwd node | cut -d: -f7)" = /bin/sh
 # The mount point for the store volume; owned by the agent user so a local
 # `docker run` without the volume works too.
 RUN mkdir -m 755 /nix && chown 20100:20100 /nix
