@@ -19,8 +19,22 @@ Paperclip's SSH environment runs each agent command over SSH on the runner.
 Only the run's own environment crosses: the server's database URL, auth secret
 and secrets key stay on the server. The agent's calls back to Paperclip go to
 a small node bridge on the runner's loopback; the server polls its file queue
-with short SSH commands about every 100 ms. So the runner needs no network
+with short SSH commands about every 100 ms. So a Legacy run needs no network
 path to the server.
+
+Paperclip's own runner (`runner: paperclip`, ACP) works differently. The
+runner daemon dials back to the server over `wss://` for each run, and it
+loads the agents from a provider pack. The server cannot copy that pack over
+ssh, so the image carries it:
+
+- `/opt/paperclip-runner/provider-pack` (about 2.7 GB) and
+  `/opt/paperclip-runner/bin/paperclip-runnerd` come from the Paperclip image
+  that the server runs (the `paperclip` stage in `runner/Dockerfile`). Bump
+  that digest together with the base image of the server (paperclip-linear).
+- Both are root-owned and not writable by the agent user. Only then does the
+  daemon report the pack as protected, and Paperclip 2026.1117.0 and later
+  accept a protected pack across compatible server releases. The build fails
+  when the daemon does not report the pack as protected, or lacks `dial_wss`.
 
 - `sshd` runs unprivileged as `node` (UID and GID 20100) on port 2222: public keys
   only, no TTY, no forwarding, no sftp.
