@@ -82,24 +82,29 @@ The runner itself:
   checks, telemetry or tool downloads).
 - Google Antigravity's ACP server (`agy-acp`, `runner/agy-acp.sh`), for a
   `gemini_local` agent with `agentCommand: agy-acp`. It uses a Google sign-in
-  (a Gemini subscription), so it needs no API key. Every agent on the runner
-  shares one user, so the real Google token stays in the `agy-broker` sidecar
-  (`runner/agy-broker`), which runs from this image with
-  `node /usr/local/lib/agy-broker/agy-broker.mjs` on `127.0.0.1:8787`. It
-  reads `token.json`, `tls.key` and `tls.crt` from
-  `/run/secrets/agy-broker/`. `agy-acp` needs the broker's CA at
-  `/etc/paperclip-runner/agy/ca.crt`. On every start it writes the broker's
-  dummy credentials and `{"auth": {"type": "oauth-personal"}}` to
-  `$GEMINI_HOME/antigravity-acp/`, and sends the server's traffic through the
-  broker. The broker terminates TLS for `oauth2.googleapis.com` and the two
-  `cloudcode-pa` hosts only, swaps the dummy token for the real one, and
-  refuses anything else to those hosts. It tunnels other hosts unchanged. An
-  agent can still send prompts through the broker, but it cannot read the
-  real token or reach other Google APIs.
+  (a Gemini subscription), so it needs no API key.
+  - The real Google token stays in the `agy-broker` sidecar
+    (`runner/agy-broker`). Every agent on the runner shares one user, so a
+    token in the agent container would be readable by all of them.
+  - Run the sidecar from this image with
+    `node /usr/local/lib/agy-broker/agy-broker.mjs`. It listens on
+    `127.0.0.1:8787`. It reads `token.json`, `tls.key` and `tls.crt` from
+    `/run/secrets/agy-broker/`.
+  - `agy-acp` needs the broker's CA at `/etc/paperclip-runner/agy/ca.crt`.
+    Before every start, it writes the broker's dummy credentials and
+    `{"auth": {"type": "oauth-personal"}}` to `$GEMINI_HOME/antigravity-acp/`.
+    Then it sends the server's traffic through the broker.
+  - The broker terminates TLS for `oauth2.googleapis.com` and the two
+    `cloudcode-pa` hosts only. It swaps the dummy token for the real one on
+    `v1internal` calls and refuses all other requests to those hosts. It does
+    not follow redirects. It tunnels other hosts unchanged.
+  - An agent can still send prompts through the broker. It cannot read the
+    real token or reach other Google APIs.
   - `GEMINI_HOME` defaults to `/home/node/.antigravity`. It must not be under
     `HOME`, because Paperclip points `HOME` at a new directory for each remote
     run. The server keeps transcripts and conversation databases there, so
-    that directory grows.
+    that directory grows. Every agent can read and change it, transcripts
+    included.
   - The server ignores the agent's model (Paperclip sends it as
     `GEMINI_MODEL`). Set `AGY_ACP_DEFAULT_MODEL` in the agent's env instead,
     for example `gemini-4-neon-high`.
