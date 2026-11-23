@@ -9,6 +9,7 @@ repository only builds images.
 | Directory | Image | Purpose |
 |---|---|---|
 | `runner/` | `ghcr.io/ryanjdillon/paperclip-agent-runner` | Target of a Paperclip `ssh` execution environment: agents run here, apart from the server and its secrets |
+| `sandbox-ssh/` | `ghcr.io/ryanjdillon/paperclip-sandbox-ssh` | Sandbox provider plugin that runs a Paperclip sandbox environment on the runner over SSH (see its README) |
 
 The server image (Paperclip plus the paperclip-linear plugin) will move here
 from paperclip-linear.

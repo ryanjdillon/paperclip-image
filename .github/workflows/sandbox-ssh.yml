@@ -1,0 +1,62 @@
+name: sandbox-ssh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - sandbox-ssh/**
+      - .github/workflows/sandbox-ssh.yml
+  pull_request:
+    paths:
+      - sandbox-ssh/**
+      - .github/workflows/sandbox-ssh.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-ssh-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sandbox-ssh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Installs the pnpm version named in package.json's packageManager field.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: sandbox-ssh/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: sandbox-ssh/pnpm-lock.yaml
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: just
+      - run: pnpm install --frozen-lockfile
+      - run: just check
+      - run: just build
+
+  image:
+    needs: check
+    # The called job declares packages: write and cannot exceed this grant,
+    # even when it only builds; registry login is skipped unless pushing.
+    permissions:
+      contents: read
+      packages: write
+    uses: ryanjdillon/workflows/.github/workflows/docker-build-push.yml@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
+    with:
+      image: ryanjdillon/paperclip-sandbox-ssh
+      context: sandbox-ssh
+      # The server image is built for both; the files are the same on each.
+      platforms: linux/amd64,linux/arm64
+      # Only main publishes; pull requests and other branches only build.
+      push: ${{ github.ref == 'refs/heads/main' }}
