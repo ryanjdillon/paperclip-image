@@ -34,7 +34,10 @@ ssh, so the image carries it:
 - Both are root-owned and not writable by the agent user. Only then does the
   daemon report the pack as protected, and Paperclip 2026.1117.0 and later
   accept a protected pack across compatible server releases. The build fails
-  when the daemon does not report the pack as protected, or lacks `dial_wss`.
+  when the daemon does not report the pack as protected, when the pack does
+  not target linux/x64, or when the daemon lacks `dial_wss`.
+
+The runner itself:
 
 - `sshd` runs unprivileged as `node` (UID and GID 20100) on port 2222: public keys
   only, no TTY, no forwarding, no sftp.
