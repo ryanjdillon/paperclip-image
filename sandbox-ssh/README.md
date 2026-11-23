@@ -23,9 +23,18 @@ its process-session bridge. This plugin sends those commands over SSH.
 - `ssh` reads only the key and `known_hosts` from the config. It uses no
   config file and no agent, and it always checks the host key. The plugin
   writes the key to a 0600 file in a 0700 directory, one for each key.
-- Stop and release end every process whose working directory is in the lease
-  directory, first with TERM and then with KILL. A release then removes the
-  directory. `stop_and_retain` keeps it.
+- Every command of a lease has `PAPERCLIP_SANDBOX_LEASE` set to the lease ID.
+  Stop and release end every process of the user that has this variable, or
+  whose working directory is in the lease directory (also through a
+  symlink). They send TERM, then KILL until none is left, and fail if a
+  process stays. A release then removes the directory. `stop_and_retain`
+  keeps it.
+- The driver's own commands (mkdir, test, stop, rm) read no profile and use
+  `PATH=/usr/bin:/bin`. Every lease can write the shared home, so a profile
+  must not steer them. Only the host's commands read the profiles.
+- Output is limited to 8 MiB for each command, both streams together. The
+  worker runs in the server's pod, so a flood of output must not use up its
+  memory.
 - A lease outlives a restart of the server. A restart of the SSH server keeps
   the lease directory only if it is on a persistent volume.
 
@@ -36,6 +45,14 @@ its process-session bridge. This plugin sends those commands over SSH.
 - The host's env goes on the `ssh` command line, the same as for Paperclip's
   `ssh` environment. Processes on the server and on the SSH server can see
   it.
+- The env, the arguments and the script go to the server as one argument.
+  Linux limits one argument to 128 KiB, so a very large env fails.
+- A process that unsets `PAPERCLIP_SANDBOX_LEASE` and leaves the lease
+  directory is not found by stop.
+- The host's `commandTimeoutMs` and `cancelActiveWork` are not used. Each
+  command has only its own time limit, and stop always ends the work.
+- On the runner, the login shell of the user must not read a startup file
+  that a lease can write (the runner uses dash; see `runner/Dockerfile`).
 - Every command opens a new SSH connection, because the runner's sshd allows
   one session for each connection (`MaxSessions 1`). On a local runner, one
   exec took about 130 ms.

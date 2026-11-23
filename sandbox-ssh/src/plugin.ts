@@ -11,7 +11,7 @@ import type {
   PluginEnvironmentValidationResult,
 } from "@paperclipai/plugin-sdk";
 import { configErrors, parseConfig, type SshSandboxConfig } from "./config.js";
-import { shellQuote, SshRunner, type RemoteRunner } from "./ssh.js";
+import { CredentialFiles, shellQuote, SshRunner, type RemoteRunner } from "./ssh.js";
 
 export const PROVIDER = "ssh-sandbox";
 /** Short limit for the driver's own housekeeping commands. */
@@ -26,16 +26,47 @@ export function leaseDir(config: SshSandboxConfig, providerLeaseId: string): str
   return path.posix.join(config.workspaceRoot, providerLeaseId);
 }
 
+/** Every command of a lease carries this variable, set to the lease ID, so stop can find its processes. */
+export const LEASE_ENV = "PAPERCLIP_SANDBOX_LEASE";
+
 /**
- * Ends every process of the login user whose working directory is in the lease
- * directory: the host's process-session bridge and the agent it started both
- * run there. TERM first, then KILL for what is left.
+ * Ends every process of the login user that belongs to the lease: its working
+ * directory is in the lease directory (also through a symlink), or its
+ * environment has LEASE_ENV for the lease. TERM first, then KILL until none is
+ * left. Exits 1 if a process is still there, so that no receipt is given for
+ * work that still runs.
  */
-export function stopProcessesScript(dir: string): string {
-  const signalAll = (signal: string) =>
-    `for p in /proc/[0-9]*; do c=$(readlink "$p/cwd" 2>/dev/null) || continue; ` +
-    `case "$c" in "$d"|"$d"/*) kill -${signal} "\${p#/proc/}" 2>/dev/null;; esac; done`;
-  return [`d=${shellQuote(dir)}`, signalAll("TERM"), "sleep 2", signalAll("KILL"), "true"].join("\n");
+export function stopProcessesScript(dir: string, providerLeaseId: string): string {
+  return [
+    `d=${shellQuote(dir)}`,
+    `tag=${shellQuote(`${LEASE_ENV}=${providerLeaseId}`)}`,
+    'real=$(cd "$d" 2>/dev/null && pwd -P) || real="$d"',
+    "owned() {",
+    '  [ -O "$1" ] || return 1',
+    '  c=$(readlink "$1/cwd" 2>/dev/null) || return 1',
+    '  case "$c" in "$d"|"$d"/*|"$real"|"$real"/*) return 0;; esac',
+    '  grep -qzxF -- "$tag" "$1/environ" 2>/dev/null',
+    "}",
+    "signal_all() {",
+    "  n=0",
+    "  for p in /proc/[0-9]*; do",
+    '    pid=${p#/proc/}',
+    '    [ "$pid" = "$$" ] && continue',
+    '    owned "$p" || continue',
+    '    kill -"$1" "$pid" 2>/dev/null && n=$((n + 1))',
+    "  done",
+    "}",
+    "signal_all TERM",
+    '[ "$n" -eq 0 ] && exit 0',
+    "sleep 2",
+    "for round in 1 2 3 4 5; do",
+    "  signal_all KILL",
+    '  [ "$n" -eq 0 ] && exit 0',
+    "  sleep 1",
+    "done",
+    'echo "processes of the lease are still running" >&2',
+    "exit 1",
+  ].join("\n");
 }
 
 function leaseMetadata(config: SshSandboxConfig, remoteCwd: string, resumedLease: boolean) {
@@ -65,7 +96,12 @@ function describe(result: { exitCode: number | null; timedOut: boolean; stderr: 
 
 export function createPlugin(runner: RemoteRunner, newId: () => string = randomUUID): PaperclipPlugin {
   async function control(config: SshSandboxConfig, script: string) {
-    return await runner.run(config, { command: "sh", args: ["-c", script], timeoutMs: CONTROL_TIMEOUT_MS });
+    return await runner.run(config, {
+      command: "sh",
+      args: ["-c", script],
+      timeoutMs: CONTROL_TIMEOUT_MS,
+      profiles: false,
+    });
   }
 
   async function mustControl(config: SshSandboxConfig, script: string, what: string) {
@@ -88,7 +124,7 @@ export function createPlugin(runner: RemoteRunner, newId: () => string = randomU
     if (!providerLeaseId) return;
     const config = runtimeConfig(rawConfig);
     const dir = leaseDir(config, providerLeaseId);
-    await mustControl(config, stopProcessesScript(dir), `stop the processes of ${providerLeaseId}`);
+    await mustControl(config, stopProcessesScript(dir, providerLeaseId), `stop the processes of ${providerLeaseId}`);
     if (retain) return { providerLeaseId, state: "stopped" };
     await mustControl(config, `rm -rf -- ${shellQuote(dir)}`, `remove ${dir}`);
     return { providerLeaseId, state: "destroyed" };
@@ -201,7 +237,7 @@ export function createPlugin(runner: RemoteRunner, newId: () => string = randomU
         command: params.command,
         args: params.args ?? [],
         cwd: params.cwd ?? leaseDir(config, params.lease.providerLeaseId),
-        env: params.env,
+        env: { ...params.env, [LEASE_ENV]: params.lease.providerLeaseId },
         stdin: params.stdin,
         timeoutMs: params.timeoutMs ?? config.timeoutMs,
       });
@@ -216,4 +252,4 @@ export function createPlugin(runner: RemoteRunner, newId: () => string = randomU
   });
 }
 
-export default createPlugin(new SshRunner());
+export default createPlugin(new SshRunner(new CredentialFiles().disposeOnExit()));

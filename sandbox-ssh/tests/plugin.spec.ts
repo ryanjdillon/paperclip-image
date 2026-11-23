@@ -1,9 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createPlugin, leaseDir, PROVIDER, stopProcessesScript } from "../src/plugin.js";
+import { createPlugin, LEASE_ENV, leaseDir, PROVIDER, stopProcessesScript } from "../src/plugin.js";
 import { parseConfig, type SshSandboxConfig } from "../src/config.js";
 import type { RemoteCommand, RemoteResult, RemoteRunner } from "../src/ssh.js";
 
@@ -53,27 +53,46 @@ describe("leaseDir", () => {
 });
 
 describe("stopProcessesScript", () => {
-  it("ends the processes in the lease directory and no others", async () => {
+  const exited = (child: ReturnType<typeof spawn>) =>
+    new Promise((resolve) => child.on("exit", (_code, signal) => resolve(signal)));
+
+  it("ends the lease's processes, through a symlink, by cwd or by tag, and no others", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "sandbox-ssh-stop-"));
-    const inside = path.join(root, "lease", "sub");
-    const outside = path.join(root, "lease-other");
-    await mkdir(inside, { recursive: true });
-    await mkdir(outside);
-    const target = spawn("sleep", ["30"], { cwd: inside, stdio: "ignore" });
-    const bystander = spawn("sleep", ["30"], { cwd: outside, stdio: "ignore" });
-    const targetExit = new Promise((resolve) => target.on("exit", (_code, signal) => resolve(signal)));
+    const real = path.join(root, "real");
+    const linked = path.join(root, "linked");
+    await mkdir(path.join(real, leaseId, "sub"), { recursive: true });
+    await mkdir(path.join(real, `${leaseId}-other`));
+    await symlink(real, linked);
+    const dir = path.join(linked, leaseId);
+    const tagged = { ...process.env, [LEASE_ENV]: leaseId };
+    const inside = spawn("sleep", ["30"], { cwd: path.join(dir, "sub"), stdio: "ignore" });
+    const moved = spawn("sleep", ["30"], { cwd: os.tmpdir(), env: tagged, stdio: "ignore" });
+    const stubborn = spawn("sh", ["-c", "trap '' TERM; while :; do sleep 1; done"], { cwd: dir, stdio: "ignore" });
+    const bystander = spawn("sleep", ["30"], { cwd: path.join(real, `${leaseId}-other`), stdio: "ignore" });
+    const otherTag = spawn("sleep", ["30"], {
+      cwd: os.tmpdir(),
+      env: { ...process.env, [LEASE_ENV]: `${leaseId}x` },
+      stdio: "ignore",
+    });
+    const ends = [exited(inside), exited(moved), exited(stubborn)];
     try {
-      const result = spawnSync("sh", ["-c", stopProcessesScript(path.join(root, "lease"))], { encoding: "utf8" });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = spawnSync("sh", ["-c", stopProcessesScript(dir, leaseId)], { encoding: "utf8" });
+      expect(result.stderr).toBe("");
       expect(result.status).toBe(0);
-      expect(await targetExit).toBe("SIGTERM");
-      expect(bystander.exitCode).toBeNull();
-      expect(bystander.signalCode).toBeNull();
+      expect(await Promise.all(ends)).toEqual(["SIGTERM", "SIGTERM", "SIGKILL"]);
+      expect(bystander.exitCode ?? bystander.signalCode).toBeNull();
+      expect(otherTag.exitCode ?? otherTag.signalCode).toBeNull();
     } finally {
-      bystander.kill("SIGKILL");
-      target.kill("SIGKILL");
+      for (const child of [inside, moved, stubborn, bystander, otherTag]) child.kill("SIGKILL");
       await rm(root, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 60_000);
+
+  it("exits at once when nothing runs", () => {
+    const result = spawnSync("sh", ["-c", stopProcessesScript("/nonexistent/lease", leaseId)], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+  });
 });
 
 describe("validate config", () => {
@@ -122,6 +141,8 @@ describe("leases", () => {
     expect(lease.providerLeaseId).toBe(leaseId);
     expect(lease.metadata).toMatchObject({ provider: PROVIDER, shellCommand: "bash", remoteCwd });
     expect(runner.scripts()).toEqual([`umask 077 && mkdir -p '${remoteCwd}'`]);
+    // Housekeeping never reads the profiles that every lease can write.
+    expect(runner.calls[0]!.command.profiles).toBe(false);
   });
 
   it("resumes a lease whose directory exists, and expires one whose directory is gone", async () => {
@@ -143,7 +164,7 @@ describe("leases", () => {
     const { plugin, runner } = setup();
     const receipt = await plugin.onEnvironmentReleaseLease!({ ...base, providerLeaseId: leaseId });
     expect(receipt).toEqual({ providerLeaseId: leaseId, state: "destroyed" });
-    expect(runner.scripts()).toEqual([stopProcessesScript(remoteCwd), `rm -rf -- '${remoteCwd}'`]);
+    expect(runner.scripts()).toEqual([stopProcessesScript(remoteCwd, leaseId), `rm -rf -- '${remoteCwd}'`]);
   });
 
   it("keeps the files for stop_and_retain and for stop", async () => {
@@ -156,7 +177,7 @@ describe("leases", () => {
     const stopped = await plugin.onEnvironmentStopLease!({ ...base, providerLeaseId: leaseId });
     expect(retained).toEqual({ providerLeaseId: leaseId, state: "stopped" });
     expect(stopped).toEqual({ providerLeaseId: leaseId, state: "stopped" });
-    expect(runner.scripts()).toEqual([stopProcessesScript(remoteCwd), stopProcessesScript(remoteCwd)]);
+    expect(runner.scripts()).toEqual([stopProcessesScript(remoteCwd, leaseId), stopProcessesScript(remoteCwd, leaseId)]);
   });
 
   it("does not remove the directory when the processes could not be stopped", async () => {
@@ -201,7 +222,7 @@ describe("execute", () => {
       command: "agy-acp",
       args: ["--x"],
       cwd: remoteCwd,
-      env: { A: "1" },
+      env: { A: "1", [LEASE_ENV]: leaseId },
       stdin: "in",
       timeoutMs: 1234,
     });
