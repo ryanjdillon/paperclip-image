@@ -109,11 +109,12 @@ RUN real=$(readlink -f /usr/local/bin/pi) \
 # ("immutable"), and a protected pack keeps working across compatible server
 # releases (Paperclip 2026.1117.0). The server finds both at these paths and
 # uses the daemon only when its sha256 equals the server's own copy.
-# The check runs as the agent user, because root can write any file and so
-# never sees the pack as protected.
+# Only entries with group or other write are changed: a recursive chmod would
+# copy the whole pack into a new layer. The check runs as the agent user,
+# because root can write any file and so never sees the pack as protected.
 COPY --from=paperclip --chown=0:0 /opt/paperclip-runner/provider-pack /opt/paperclip-runner/provider-pack
 COPY --from=paperclip --chown=0:0 --chmod=755 /app/server/dist/vendor/paperclip-runner/bin/paperclip-runnerd /opt/paperclip-runner/bin/paperclip-runnerd
-RUN chmod -R go-w /opt/paperclip-runner \
+RUN find /opt/paperclip-runner -perm /022 ! -type l -exec chmod go-w {} + \
  && setpriv --reuid=20100 --regid=20100 --clear-groups \
       /opt/paperclip-runner/bin/paperclip-runnerd --build-metadata \
       --provider-pack-root /opt/paperclip-runner/provider-pack >/tmp/runnerd.json \
