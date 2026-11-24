@@ -15,6 +15,47 @@ set -eu
 
 real=@PI_REAL@
 
+# The image's own pi extensions (web_search, DIL-994). Paperclip's pi_local
+# adapter starts pi with `--tools read,bash,edit,write,grep,find,ls`, an
+# allowlist that also applies to extension tools, and it can point
+# PI_CODING_AGENT_DIR at its own directory, so neither auto-discovery nor a
+# tool that is not on the list reaches a run. So, for an agent run (the
+# first argument is an option, not a subcommand such as `install`), add
+# `-e <extension>` and add web_search to a `--tools`/`-t` list. With
+# `--no-extensions` or `--no-tools` the arguments stay as they are.
+ext=/opt/pi-extensions/web-search.ts
+case "${1:-}" in
+  -*)
+    add=1
+    for a do
+      case "$a" in
+        --no-extensions | -ne | --no-tools | -nt) add=0 ;;
+      esac
+    done
+    if [ "$add" = 1 ] && [ -r "$ext" ]; then
+      tools_next=0
+      first=1
+      for a do
+        if [ "$first" = 1 ]; then
+          set -- -e "$ext"
+          first=0
+        fi
+        if [ "$tools_next" = 1 ]; then
+          case ",$a," in
+            *,web_search,*) ;;
+            *) a="$a,web_search" ;;
+          esac
+          tools_next=0
+        fi
+        case "$a" in
+          --tools | -t) tools_next=1 ;;
+        esac
+        set -- "$@" "$a"
+      done
+    fi
+    ;;
+esac
+
 # pi started by a pi run (its bash tool sets PI_CODING_AGENT) belongs to that
 # run's slot; waiting for another would deadlock when every slot is a parent.
 if [ "${PI_CODING_AGENT:-}" = true ]; then

@@ -104,6 +104,24 @@ RUN real=$(readlink -f /usr/local/bin/pi) \
  && ! grep -q @PI_REAL@ /usr/local/bin/pi \
  && pi --version \
  && rm -rf /tmp/pi-slots /root/.pi
+# web_search, the image's own pi extension (DIL-994): web search through the
+# cluster's SearXNG. Root-owned and read-only to the agent user. The wrapper
+# (pi-slot.sh) loads it with `-e` and adds it to Paperclip's `--tools` list.
+# The tests run here: CI only builds this image, so a failed test fails the
+# build. They load it through pi's own loader, run it against a stub SearXNG
+# (format, caps, errors, abort and timeout), and start pi through the wrapper
+# offline to check that web_search is an active tool. COPY --chmod also gives
+# the new directory mode 644, so the RUN sets it to 755.
+COPY --chown=0:0 --chmod=644 pi-extensions/web-search.ts /opt/pi-extensions/web-search.ts
+COPY pi-extensions/web-search.test.mjs /tmp/web-search-test/web-search.test.mjs
+RUN chmod 755 /opt/pi-extensions \
+ && test "$(stat -c '%a %U %G' /opt/pi-extensions /opt/pi-extensions/web-search.ts)" = "$(printf '755 root root\n644 root root')" \
+ && cd /tmp/web-search-test \
+ && PI_PACKAGE_DIR="$(npm root -g)/@earendil-works/pi-coding-agent" \
+    WEB_SEARCH_EXTENSION=/opt/pi-extensions/web-search.ts \
+    node --test web-search.test.mjs \
+ && cd / \
+ && rm -rf /tmp/web-search-test /tmp/pi-slots /root/.pi
 
 # Google Antigravity's ACP server (DIL-963), for gemini_local agents with
 # agentCommand `agy-acp` (runner/agy-acp.sh). The URL and the archive sha256
