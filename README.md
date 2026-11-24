@@ -142,12 +142,14 @@ The runner itself:
   installed root-owned at `/opt/pi-extensions/web-search.ts`). It sends the
   query to the cluster's SearXNG
   (`http://searxng.aitools.svc.cluster.local:8080/search`, JSON API) and
-  returns a numbered Markdown list: title, URL, snippet and the engines that
-  found each result. There is no fallback to another search service. Set
+  returns a numbered list: title, URL, snippet and the engines that found
+  each result. There is no fallback to another search service. Set
   `WEB_SEARCH_URL` in the agent's env to use another SearXNG `/search` URL.
   - Limits: a query of at most 500 characters, 1 to 10 results (default 5),
     a timeout of 15 s, titles of at most 200 characters and snippets of at
-    most 500, and at most 8000 characters in total.
+    most 500, and at most 8000 characters in total. Newlines, control
+    characters and zero-width and bidi controls are removed from the result
+    text, so a result cannot add lines or hide text.
   - A failure (for example "search service unavailable (HTTP 503)") is an
     error result with clear text. "No results" is a normal result.
   - The tool description tells the model that results are untrusted data,
@@ -161,11 +163,14 @@ The runner itself:
     `:485`), so `~/.pi/agent/extensions` is not a reliable place. The pi
     wrapper (`runner/pi-slot.sh`) therefore adds `-e
     /opt/pi-extensions/web-search.ts` and adds `web_search` to a `--tools`
-    list. It changes nothing for a subcommand (`pi install`) or with
-    `--no-extensions` or `--no-tools`.
+    list. It changes nothing for a subcommand (`pi install`), with
+    `--no-extensions` or `--no-tools`, for an empty list, or after `--`. pi
+    does not read `--tools=x` as a tool list, so the wrapper leaves it alone.
   - The build tests it (`runner/pi-extensions/web-search.test.mjs`): through
     pi's own loader against a stub SearXNG, and with pi started offline
     through the wrapper to check that `web_search` is an active tool.
+    `runner/pi-slot.test.sh` tests the wrapper's argument changes with a stub
+    in place of the real pi.
 - `env` and `printenv` (`/usr/local/lib/paperclip-shims`, linked from
   `/usr/local/bin`) print variable names only when listing; `env NAME=VALUE
   cmd`, `--help` and `--version` pass through unchanged, and `printenv NAME`

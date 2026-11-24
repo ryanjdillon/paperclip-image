@@ -8,7 +8,8 @@
 // pi imports, so the file needs no node_modules.
 //
 // SearXNG only, with no fallback. WEB_SEARCH_URL overrides the endpoint (the
-// full /search URL). The output is capped per field and in total, so a large
+// full /search URL). WEB_SEARCH_TIMEOUT_MS sets a shorter timeout (the build
+// tests use it); the default is 15 s. The output is capped per field and in total, so a large
 // or hostile result page cannot fill the model's context.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -16,6 +17,12 @@ import { Type } from "typebox";
 
 export const DEFAULT_SEARCH_URL = "http://searxng.aitools.svc.cluster.local:8080/search";
 export const TIMEOUT_MS = 15_000;
+
+// WEB_SEARCH_TIMEOUT_MS, 1 to 60000 ms; otherwise the 15 s default.
+function timeoutMs(): number {
+  const n = Number(process.env.WEB_SEARCH_TIMEOUT_MS);
+  return Number.isInteger(n) && n >= 1 && n <= 60_000 ? n : TIMEOUT_MS;
+}
 export const MAX_QUERY_CHARS = 500;
 export const DEFAULT_RESULTS = 5;
 export const MAX_RESULTS = 10;
@@ -33,11 +40,13 @@ type SearchOutcome =
   | { ok: true; text: string; count: number }
   | { ok: false; text: string };
 
-// One line of plain text: no control characters, collapsed whitespace, at
-// most `max` characters, and never half of a surrogate pair.
+// One line of plain text: no control characters, no zero-width or bidi
+// controls, collapsed whitespace, at most `max` characters, and never half of
+// a surrogate pair.
 export function clip(value: unknown, max: number): string {
   const text = String(value ?? "")
     .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ")
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "")
     .replace(/\s+/g, " ")
     .trim();
   if (text.length <= max) return text;
@@ -97,7 +106,7 @@ function format(query: string, results: unknown[], maxResults: number): { text: 
       : clip(r.engine, MAX_ENGINES_CHARS);
     const n = entries.length + 1;
     const lines = [`${n}. ${title}`, `   URL: ${url}`];
-    if (snippet) lines.push(`   ${snippet}`);
+    if (snippet) lines.push(`   Snippet: ${snippet}`);
     if (engines) lines.push(`   Engines: ${engines}`);
     const entry = lines.join("\n");
     if (used + entry.length + 2 > MAX_OUTPUT_CHARS) {
@@ -128,7 +137,8 @@ export async function search(
   if (!url) return { ok: false, text: "web_search: WEB_SEARCH_URL is not a valid http(s) URL." };
 
   if (signal?.aborted) return { ok: false, text: "web_search: the search was cancelled." };
-  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  const limitMs = timeoutMs();
+  const timeout = AbortSignal.timeout(limitMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let body: string | null;
   try {
@@ -141,7 +151,7 @@ export async function search(
   } catch (err) {
     if (signal?.aborted) return { ok: false, text: "web_search: the search was cancelled." };
     if (timeout.aborted) {
-      return { ok: false, text: `web_search: search service unavailable (no answer in ${TIMEOUT_MS / 1000} s).` };
+      return { ok: false, text: `web_search: search service unavailable (no answer in ${limitMs / 1000} s).` };
     }
     const cause = (err as { cause?: { code?: unknown; message?: unknown } })?.cause;
     const reason = typeof cause?.code === "string"
