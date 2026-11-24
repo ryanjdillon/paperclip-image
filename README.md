@@ -154,14 +154,19 @@ The runner itself:
   at `/run/secrets/git/skrap/key` and GitHub's host keys pinned in
   `/etc/ssh/github_known_hosts`. Commits are made as "dillonteknisk agents"
   (`/etc/gitconfig`).
-- Egress proxy (DIL-888): `/etc/profile.d` sets `https_proxy` and
-  `HTTPS_PROXY` to the cluster's CONNECT proxy
-  (`agent-egress.paperclip-agents.svc.cluster.local:3128`), and `no_proxy`
-  and `NO_PROXY` to loopback and `.cluster.local`. The ssh config sends
-  git over SSH through the same proxy (`ssh-proxy-connect`, with OpenBSD
-  netcat). Without `https_proxy`, for example in a job that reads no
-  profile, `ssh-proxy-connect` connects directly. The variables are
-  defaults, not a boundary: the deployment's NetworkPolicy is.
+- Egress proxy (DIL-888): `/etc/profile.d` sets these variables.
+  - `https_proxy` and `HTTPS_PROXY` point to the cluster's CONNECT proxy,
+    `agent-egress.paperclip-agents.svc.cluster.local:3128`.
+  - `no_proxy` and `NO_PROXY` cover loopback, `.svc` and `.cluster.local`.
+  - `NODE_USE_ENV_PROXY=1` makes Node honour them (Node 24.0.0 and later).
+
+  The ssh config sends git over SSH through the same proxy, with
+  `ssh-proxy-connect` and OpenBSD netcat, and sends a keepalive every 10 s.
+  Without `https_proxy`, for example in a job that reads no profile,
+  `ssh-proxy-connect` connects directly. It refuses a proxy URL with
+  credentials. The variables are defaults, not a boundary: the deployment's
+  NetworkPolicy is. `agy-acp` points agy and its child processes at the
+  agy-broker instead, which bypasses this proxy (DIL-993).
 - Base tools: git, curl, jq, python3 (with venv), make, unzip, less, file,
   xz, ripgrep and fd. Anything more comes from the repository's own flake.
 - Nix (single-user, static binary at `/usr/local/bin/nix`, flakes on): mount

@@ -24,10 +24,17 @@ export PYTHONNOUSERSITE=1
 export PAPERCLIP_SHIM_DIR=/usr/local/lib/paperclip-shims
 # Egress (DIL-888): HTTPS goes through the cluster's CONNECT proxy, which logs
 # each host and holds the allowlist. The runner's NetworkPolicy is the
-# boundary, not these variables. Cluster addresses (the AI gateway, the
-# runner ingress, the agy-broker) stay direct. git over SSH uses the proxy
-# through ssh-proxy-connect. agy-acp sets its own HTTPS_PROXY (the broker).
+# boundary, not these variables. NO_PROXY keeps cluster names direct: the
+# runner ingress and the agy-broker (.svc.cluster.local, and the short .svc
+# form). The AI gateway is plain http://, which HTTPS_PROXY never covers.
+# git over SSH uses the proxy through ssh-proxy-connect. agy-acp sets its own
+# HTTPS_PROXY, the broker, for agy and its child processes (DIL-993).
+# NODE_USE_ENV_PROXY: Node 24.0.0 and later (Node.js CLI docs) then route
+# requests through HTTPS_PROXY and honour NO_PROXY; checked on Node 24.22.3
+# for fetch and https.get. Without it Node ignores the variables, and a Node
+# tool's request is refused once the runner has no direct HTTPS rule.
 export https_proxy=http://agent-egress.paperclip-agents.svc.cluster.local:3128
 export HTTPS_PROXY=$https_proxy
-export no_proxy=localhost,127.0.0.1,::1,.cluster.local
+export no_proxy=localhost,127.0.0.1,::1,.svc,.cluster.local
 export NO_PROXY=$no_proxy
+export NODE_USE_ENV_PROXY=1

@@ -58,6 +58,11 @@ mv -f "$bundle_tmp" "$bundle"
 trap - EXIT
 
 AGY_ACP_FORCE_FILE_STORAGE=1
+# The broker is the proxy for the server and for every process it starts,
+# the commands that it runs for an agent included. Those bypass the runner's
+# egress proxy (agent-egress, DIL-888) and its allowlist. The server reads
+# its proxy only from the environment, so the fix is in the broker or in
+# its egress (DIL-993).
 HTTPS_PROXY=$broker
 https_proxy=$broker
 # The broker host is not in NO_PROXY: a client never sends its connection to
