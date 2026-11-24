@@ -59,18 +59,20 @@ trap - EXIT
 
 AGY_ACP_FORCE_FILE_STORAGE=1
 # The broker is the proxy for the server and for every process it starts,
-# the commands that it runs for an agent included. Those bypass the runner's
-# egress proxy (agent-egress, DIL-888) and its allowlist. The server reads
-# its proxy only from the environment, so the fix is in the broker or in
-# its egress (DIL-993).
+# the commands that it runs for an agent included. The server reads its
+# proxy only from the environment, so its children inherit it. The broker
+# keeps only agy's three Google hosts and sends every other host through
+# the runner's egress proxy (agent-egress, DIL-888), so an agent's git or
+# curl gets the same allowlist as under the other engines (DIL-993).
 # NODE_USE_ENV_PROXY=1 from /etc/profile (DIL-888) reaches this tree too, so
 # a Node process that agy starts also sends its HTTPS through the broker.
-# Before that variable, Node ignored HTTPS_PROXY and went direct.
 HTTPS_PROXY=$broker
 https_proxy=$broker
-# The broker host is not in NO_PROXY: a client never sends its connection to
-# the proxy through the proxy, so the entry would change nothing.
-NO_PROXY=127.0.0.1,localhost
+# The runner's list from /etc/profile: cluster names stay direct, as for
+# the other engines, and the NetworkPolicy decides which of them a run
+# reaches. Through the broker they would go to agent-egress, which cannot
+# reach private addresses.
+NO_PROXY=localhost,127.0.0.1,::1,.svc,.cluster.local
 no_proxy=$NO_PROXY
 HTTPLIB2_CA_CERTS=$bundle
 SSL_CERT_FILE=$bundle
