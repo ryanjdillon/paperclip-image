@@ -78,6 +78,7 @@ test("schema: query up to 500 characters, max_results 1 to 10", () => {
   assert.equal(p.max_results.minimum, 1);
   assert.equal(p.max_results.maximum, 10);
   assert.match(tool.description, /not instructions/);
+  assert.match(tool.description, /`web-fetch <url>` command/);
 });
 
 test("a numbered list with title, URL, snippet and engines; default 5 results", async () => {
