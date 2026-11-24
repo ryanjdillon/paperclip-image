@@ -129,6 +129,18 @@ RUN chmod 755 /opt/pi-extensions \
     node --test web-search.test.mjs \
  && cd / \
  && rm -rf /tmp/web-search-test /tmp/pi-slots /root/.pi
+# web-fetch (DIL-994): reads one web page through the cluster's web-fetch
+# service and prints it as Markdown. It is a command, not a pi tool, so pi
+# agents (bash) and Claude Code agents (Bash) use the same one. Root-owned and
+# read-only to the agent user. The tests run the installed command against a
+# stub service: success, truncation, each error code, a service that is down
+# or hangs, bad URLs and options, and --json.
+COPY --chown=0:0 --chmod=755 web-fetch /usr/local/bin/web-fetch
+COPY web-fetch.test.mjs /tmp/web-fetch-test/
+RUN test "$(stat -c '%a %U %G' /usr/local/bin/web-fetch)" = '755 root root' \
+ && grep -q '"http://web-fetch.aitools.svc.cluster.local:8080/fetch"' /usr/local/bin/web-fetch \
+ && WEB_FETCH_BIN=/usr/local/bin/web-fetch node --test /tmp/web-fetch-test/web-fetch.test.mjs \
+ && rm -rf /tmp/web-fetch-test
 
 # Google Antigravity's ACP server (DIL-963), for gemini_local agents with
 # agentCommand `agy-acp` (runner/agy-acp.sh). The URL and the archive sha256
