@@ -5,7 +5,7 @@ import net from "node:net";
 import {
   DUMMY_ACCESS_TOKEN, DUMMY_REFRESH_TOKEN, MAX_BODY_BYTES, createBroker, createTerminatedServer,
   MAX_HEADER_SETS, createTokenSource, dummyCredentials, forwardHeaders, isNetworkError, parseHeaderList, route,
-  upstreamUrl,
+  upstreamUrl, connectDecision, parseEgressProxy, DEFAULT_EGRESS_PROXY,
 } from "./agy-broker.mjs";
 
 const form = (fields) => new URLSearchParams(fields);
@@ -374,4 +374,191 @@ test("a failed refresh is reported without a token", async () => {
   const { impl } = fakeFetch([{ status: 400, body: { error: "invalid_grant" } }]);
   const source = createTokenSource({ readToken: () => ({ refresh_token: "r" }), fetchImpl: impl, now: () => 0 });
   await assert.rejects(source(), /refresh failed: HTTP 400 invalid_grant/);
+});
+
+// DIL-993: agy's child processes (an agent's git or curl) use the broker as
+// their proxy. Only the three Google hosts stay in the broker; every other
+// host goes through agent-egress, or gets 403 without it.
+
+const EGRESS = { host: "127.0.0.1", port: 1 };
+
+test("connectDecision: the Google hosts are terminated, every other host is chained", () => {
+  for (const host of ["oauth2.googleapis.com", "cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com"]) {
+    assert.deepEqual(connectDecision(`${host}:443`, EGRESS), { action: "terminate", host });
+    assert.deepEqual(connectDecision(`${host.toUpperCase()}:443`, EGRESS), { action: "terminate", host });
+  }
+  for (const host of ["github.com", "ssh.github.com", "example.com", "storage.googleapis.com", "oauth2.googleapis.com.evil.test"]) {
+    assert.deepEqual(connectDecision(`${host}:443`, EGRESS), { action: "chain", host });
+  }
+  // A trailing dot is refused: the name is neither terminated nor chained.
+  assert.equal(connectDecision("oauth2.googleapis.com.:443", EGRESS).action, "refuse");
+});
+
+test("connectDecision: without an egress proxy, other hosts are refused", () => {
+  assert.equal(connectDecision("cloudcode-pa.googleapis.com:443", null).action, "terminate");
+  const refused = connectDecision("github.com:443", null);
+  assert.equal(refused.action, "refuse");
+  assert.match(refused.reason, /github\.com is not one of agy's Google hosts/);
+});
+
+test("connectDecision: other ports and malformed authorities are refused", () => {
+  for (const authority of [
+    "github.com:80", "github.com:22", "cloudcode-pa.googleapis.com:80", "github.com", "github.com:", ":443", "",
+    "[::1]:443", "user@github.com:443", "git hub.com:443", "github.com\r\nx: y:443", "-github.com:443",
+    "github..com:443", "github.com:0443", undefined,
+  ]) {
+    assert.equal(connectDecision(authority, EGRESS).action, "refuse", String(authority));
+  }
+});
+
+test("parseEgressProxy: default, empty and invalid values", () => {
+  assert.deepEqual(parseEgressProxy(undefined), { host: "agent-egress.paperclip-agents.svc.cluster.local", port: 3128 });
+  assert.equal(DEFAULT_EGRESS_PROXY, "http://agent-egress.paperclip-agents.svc.cluster.local:3128");
+  assert.equal(parseEgressProxy(""), null);
+  assert.deepEqual(parseEgressProxy("http://10.0.0.1:3128/"), { host: "10.0.0.1", port: 3128 });
+  for (const bad of ["agent-egress:3128", "https://agent-egress:3128", "http://agent-egress", "http://u:p@agent-egress:3128",
+    "http://agent-egress:3128/x", "http://agent-egress:3128?a=b", "not a url"]) {
+    assert.throws(() => parseEgressProxy(bad), /AGY_BROKER_EGRESS_PROXY/, bad);
+  }
+});
+
+/** A stand-in for agent-egress: it allows the hosts in `allow` and echoes the tunnel. */
+async function fakeEgress({ allow = [], reply } = {}) {
+  const requests = [];
+  const server = net.createServer((s) => {
+    let head = "";
+    const onData = (chunk) => {
+      head += chunk.toString("latin1");
+      const end = head.indexOf("\r\n\r\n");
+      if (end === -1) return;
+      s.off("data", onData);
+      const line = head.slice(0, head.indexOf("\r\n"));
+      requests.push(line);
+      if (reply) { s.end(reply); return; }
+      const host = line.split(" ")[1];
+      if (!allow.includes(host)) { s.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n"); return; }
+      s.write("HTTP/1.1 200 OK\r\n\r\n");
+      const rest = head.slice(end + 4);
+      if (rest) s.write(`echo:${rest}`);
+      s.on("data", (c) => s.write(`echo:${c}`));
+    };
+    s.on("data", onData);
+    s.on("error", () => s.destroy());
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { server, requests, proxy: { host: "127.0.0.1", port: server.address().port } };
+}
+
+/** Sends a CONNECT to the broker; resolves with the reply head and a function for the tunnel. */
+function connectThrough(port, authority, { payload } = {}) {
+  return new Promise((resolve, reject) => {
+    const s = net.connect(port, "127.0.0.1", () => s.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n\r\n`));
+    let data = "";
+    let sent = false;
+    s.on("data", (c) => {
+      data += c;
+      if (data.includes("\r\n\r\n") && payload && !sent && data.startsWith("HTTP/1.1 200")) { sent = true; s.write(payload); }
+      if (payload && data.includes(`echo:${payload}`)) { s.destroy(); resolve(data); }
+    });
+    s.on("end", () => resolve(data));
+    s.on("close", () => resolve(data));
+    s.on("error", reject);
+  });
+}
+
+async function startBroker(options) {
+  const lines = [];
+  const broker = createBroker({ readToken: () => ({}), tlsOptions: {}, fetchImpl: async () => new Response("x"),
+    logger: (...parts) => lines.push(parts.join(" ")), ...options });
+  await new Promise((resolve) => broker.listen(0, "127.0.0.1", resolve));
+  return { broker, lines, port: broker.address().port };
+}
+
+test("broker: another host on 443 is chained through the egress proxy", async () => {
+  const egress = await fakeEgress({ allow: ["github.com:443"] });
+  const { broker, lines, port } = await startBroker({ egressProxy: egress.proxy });
+  try {
+    const data = await connectThrough(port, "github.com:443", { payload: "ping" });
+    assert.match(data, /^HTTP\/1\.1 200 Connection Established\r\n\r\n/);
+    assert.ok(data.includes("echo:ping"));
+    assert.deepEqual(egress.requests, ["CONNECT github.com:443 HTTP/1.1"]);
+    assert.ok(lines.some((l) => l === "CONNECT github.com chain"));
+  } finally { await broker.shutdown(); egress.server.close(); }
+});
+
+test("broker: a host that agent-egress refuses gets 403 with a reason", async () => {
+  const egress = await fakeEgress({ allow: [] });
+  const { broker, port } = await startBroker({ egressProxy: egress.proxy });
+  try {
+    const data = await connectThrough(port, "exfil.example:443");
+    assert.match(data, /^HTTP\/1\.1 403 Forbidden/);
+    assert.match(data, /agent-egress refused the host for exfil\.example:443/);
+    assert.deepEqual(egress.requests, ["CONNECT exfil.example:443 HTTP/1.1"]);
+  } finally { await broker.shutdown(); egress.server.close(); }
+});
+
+test("broker: the Google hosts never go to the egress proxy", async () => {
+  const egress = await fakeEgress({ allow: ["oauth2.googleapis.com:443"] });
+  const { broker, port } = await startBroker({ egressProxy: egress.proxy });
+  try {
+    const s = net.connect(port, "127.0.0.1", () => s.write("CONNECT oauth2.googleapis.com:443 HTTP/1.1\r\nHost: x\r\n\r\n"));
+    const data = await new Promise((resolve, reject) => {
+      let d = "";
+      s.on("data", (c) => { d += c; if (d.includes("\r\n\r\n")) { s.destroy(); resolve(d); } });
+      s.on("error", reject);
+    });
+    assert.match(data, /^HTTP\/1\.1 200 Connection Established/);
+    assert.deepEqual(egress.requests, []);
+  } finally { await broker.shutdown(); egress.server.close(); }
+});
+
+test("broker: without an egress proxy, another host gets 403 and no connection", async () => {
+  const { broker, lines, port } = await startBroker({ egressProxy: null });
+  try {
+    const data = await connectThrough(port, "github.com:443");
+    assert.match(data, /^HTTP\/1\.1 403 Forbidden/);
+    assert.match(data, /github\.com is not one of agy's Google hosts/);
+    assert.ok(lines.some((l) => l.startsWith("CONNECT github.com refuse")));
+  } finally { await broker.shutdown(); }
+});
+
+test("broker: an unreachable egress proxy gives 502, a silent one 504", async () => {
+  const closed = net.createServer();
+  await new Promise((resolve) => closed.listen(0, "127.0.0.1", resolve));
+  const deadPort = closed.address().port;
+  await new Promise((resolve) => closed.close(resolve));
+  const silent = net.createServer(() => {});
+  await new Promise((resolve) => silent.listen(0, "127.0.0.1", resolve));
+  const a = await startBroker({ egressProxy: { host: "127.0.0.1", port: deadPort } });
+  const b = await startBroker({ egressProxy: { host: "127.0.0.1", port: silent.address().port }, egressHandshakeMs: 200 });
+  try {
+    assert.match(await connectThrough(a.port, "github.com:443"), /^HTTP\/1\.1 502 Bad Gateway[\s\S]*not reachable/);
+    assert.match(await connectThrough(b.port, "github.com:443"), /^HTTP\/1\.1 504 Gateway Timeout[\s\S]*did not answer/);
+  } finally {
+    await a.broker.shutdown(); await b.broker.shutdown();
+    silent.close();
+  }
+});
+
+test("broker: an egress reply other than 200 or 403 gives 502", async () => {
+  const egress = await fakeEgress({ reply: "HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\n\r\n" });
+  const { broker, port } = await startBroker({ egressProxy: egress.proxy });
+  try {
+    assert.match(await connectThrough(port, "github.com:443"), /^HTTP\/1\.1 502 Bad Gateway[\s\S]*answered 503/);
+  } finally { await broker.shutdown(); egress.server.close(); }
+});
+
+test("broker: a plain HTTP proxy request gets 403", async () => {
+  const { broker, port } = await startBroker({ egressProxy: EGRESS });
+  try {
+    const reply = await new Promise((resolve, reject) => {
+      const s = net.connect(port, "127.0.0.1", () => s.write("GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"));
+      let d = "";
+      s.on("data", (c) => { d += c; });
+      s.on("end", () => resolve(d));
+      s.on("error", reject);
+    });
+    assert.match(reply, /^HTTP\/1\.1 403/);
+    assert.match(reply, /use CONNECT/);
+  } finally { await broker.shutdown(); }
 });

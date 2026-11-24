@@ -9,7 +9,15 @@
 // - cloudcode-pa and daily-cloudcode-pa: a /v1internal request that carries
 //   the dummy access token goes upstream with the real access token. The broker
 //   refuses every other request to these hosts.
-// - Any other host on port 443: a plain tunnel, without TLS termination.
+// - Any other host on port 443: a tunnel through agent-egress, the runner's
+//   egress proxy (DIL-888, DIL-993), without TLS termination. agy's child
+//   processes inherit the broker as their proxy, so an agent's git or curl
+//   comes here. The chain puts them under the same allowlist as the other
+//   engines. With AGY_BROKER_EGRESS_PROXY set empty, the broker refuses
+//   these hosts with 403 instead.
+//
+// The broker connects directly only to the three hosts above, and only
+// with its own fetch calls. It never opens a raw tunnel to the internet.
 //
 // The broker terminates TLS for those three hosts with its own certificate.
 // agy trusts it through a CA bundle that agy-acp builds. The dummy values are
@@ -21,7 +29,8 @@
 // addresses. A NetworkPolicy admits only the runner pods from the cluster.
 // kube-router also admits traffic from the pod's own node, so processes and
 // hostNetwork pods on that node can connect too. Caller authentication is a
-// follow-up (DIL-973).
+// follow-up (DIL-989). Such a caller can also use the chain to agent-egress,
+// which it can reach directly anyway; that proxy holds no secret.
 import http from "node:http";
 import net from "node:net";
 import tls from "node:tls";
@@ -35,6 +44,14 @@ export const DUMMY_ACCESS_TOKEN = "agy-broker-dummy-access-token";
 export const OAUTH_HOST = "oauth2.googleapis.com";
 export const CCPA_HOSTS = new Set(["cloudcode-pa.googleapis.com", "daily-cloudcode-pa.googleapis.com"]);
 export const TERMINATED_HOSTS = new Set([OAUTH_HOST, ...CCPA_HOSTS]);
+// The proxy for CONNECT to every other host (agent-egress.yaml in
+// nix-config). A plain http:// URL with a host and a port, no credentials.
+export const DEFAULT_EGRESS_PROXY = "http://agent-egress.paperclip-agents.svc.cluster.local:3128";
+// agent-egress answers a CONNECT with a short head. A longer reply is not
+// that proxy, and the broker does not hold it in memory.
+const MAX_PROXY_REPLY_BYTES = 16 * 1024;
+// Time for the connection to agent-egress and its reply to the CONNECT.
+export const EGRESS_HANDSHAKE_MS = 15_000;
 // agy's largest requests carry a conversation; 16 MiB is far above them and
 // keeps one agent from exhausting the broker's memory.
 export const MAX_BODY_BYTES = 16 * 1024 * 1024;
@@ -318,7 +335,114 @@ export function createTerminatedServer({
   return server;
 }
 
-export function createBroker({ readToken, tlsOptions, fetchImpl = fetch, logHeaderNames = false, allowlist = null }) {
+/**
+ * The proxy for chained tunnels, from AGY_BROKER_EGRESS_PROXY. Unset means
+ * DEFAULT_EGRESS_PROXY. Empty means no proxy: the broker refuses the hosts
+ * it does not terminate. A value that is not http://host:port, or that
+ * carries credentials, a path or a query, is an error: the caller then
+ * refuses too, so that a typo never opens a direct path.
+ */
+export function parseEgressProxy(text) {
+  if (text === undefined) text = DEFAULT_EGRESS_PROXY;
+  if (text === "") return null;
+  let url;
+  try { url = new URL(text); } catch { throw new Error("AGY_BROKER_EGRESS_PROXY is not a URL"); }
+  const port = Number(url.port);
+  if (url.protocol !== "http:" || !url.hostname || !port || url.username || url.password
+    || (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) {
+    throw new Error("AGY_BROKER_EGRESS_PROXY must be http://host:port");
+  }
+  return { host: url.hostname, port };
+}
+
+// A DNS name: letters, digits, hyphens and dots, as a CONNECT authority from
+// agy, git or curl has. IP literals in brackets (IPv6), user info, spaces and
+// control characters never reach agent-egress or the log.
+const HOST_NAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
+
+/**
+ * What to do with a CONNECT to `authority` (host:port): terminate it for
+ * the three Google hosts, chain it through agent-egress for any other host
+ * on 443, or refuse it. proxy: see parseEgressProxy.
+ */
+export function connectDecision(authority, proxy) {
+  const text = typeof authority === "string" ? authority : "";
+  const colon = text.lastIndexOf(":");
+  const host = colon > 0 ? text.slice(0, colon).toLowerCase() : "";
+  const portText = colon > 0 ? text.slice(colon + 1) : "";
+  if (!HOST_NAME.test(host)) return { action: "refuse", reason: "not a host name" };
+  if (portText !== "443") return { action: "refuse", host, reason: "only port 443" };
+  if (TERMINATED_HOSTS.has(host)) return { action: "terminate", host };
+  if (!proxy) return { action: "refuse", host, reason: `${host} is not one of agy's Google hosts, and no egress proxy is set` };
+  return { action: "chain", host };
+}
+
+const REASONS = { 403: "Forbidden", 502: "Bad Gateway", 504: "Gateway Timeout" };
+
+/** Ends a CONNECT with a status and a one-line reason in the body. */
+function refuseTunnel(socket, status, message) {
+  const body = `${message}\n`;
+  socket.end(`HTTP/1.1 ${status} ${REASONS[status]}\r\ncontent-type: text/plain\r\n`
+    + `content-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+}
+
+/**
+ * Opens a tunnel to host:443 through the egress proxy and joins it to the
+ * client's socket. The proxy's refusal goes back to the client as 403, a
+ * fault or a silent proxy as 502 or 504. The tunnel carries TLS from end to
+ * end; the broker sees only the host name.
+ */
+export function chainTunnel({ socket, head, host, proxy, logger = log, handshakeMs = EGRESS_HANDSHAKE_MS }) {
+  const upstream = net.connect(proxy.port, proxy.host);
+  let reply = Buffer.alloc(0);
+  // handshake, then open (joined) or failed (the client has its reply).
+  let state = "handshake";
+  const fail = (status, why) => {
+    if (state !== "handshake") return;
+    state = "failed";
+    logger("CONNECT", host, "chain failed", why);
+    upstream.destroy();
+    if (!socket.destroyed) refuseTunnel(socket, status, `agy-broker: agent-egress ${why} for ${host}:443`);
+  };
+  const lost = (why) => { if (state === "open") socket.destroy(); else fail(502, why); };
+  upstream.setTimeout(handshakeMs, () => fail(504, "did not answer"));
+  upstream.on("error", (error) => lost(`is not reachable (${error.code ?? "error"})`));
+  upstream.on("close", () => lost("closed the connection"));
+  socket.on("close", () => upstream.destroy());
+  upstream.on("connect", () => {
+    upstream.write(`CONNECT ${host}:443 HTTP/1.1\r\nHost: ${host}:443\r\n\r\n`);
+  });
+  const onData = (chunk) => {
+    reply = Buffer.concat([reply, chunk]);
+    const end = reply.indexOf("\r\n\r\n");
+    if (end === -1) {
+      if (reply.length > MAX_PROXY_REPLY_BYTES) fail(502, "sent a reply that is too long");
+      return;
+    }
+    upstream.off("data", onData);
+    const status = /^HTTP\/1\.[01] (\d{3})/.exec(reply.subarray(0, end).toString("latin1"))?.[1];
+    if (status !== "200") {
+      fail(status === "403" ? 403 : 502, status === "403" ? "refused the host" : `answered ${status ?? "with no status"}`);
+      return;
+    }
+    state = "open";
+    upstream.setTimeout(0);
+    logger("CONNECT", host, "chain");
+    socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+    const rest = reply.subarray(end + 4);
+    if (rest.length) socket.write(rest);
+    if (head?.length) upstream.write(head);
+    upstream.pipe(socket);
+    socket.pipe(upstream);
+  };
+  upstream.on("data", onData);
+  return upstream;
+}
+
+export function createBroker({
+  readToken, tlsOptions, fetchImpl = fetch, logHeaderNames = false, allowlist = null,
+  egressProxy = null, egressHandshakeMs = EGRESS_HANDSHAKE_MS, logger = log,
+}) {
   const accessToken = createTokenSource({ readToken, fetchImpl });
   const terminated = createTerminatedServer({ accessToken, fetchImpl, logHeaderNames, allowlist });
 
@@ -335,18 +459,29 @@ export function createBroker({ readToken, tlsOptions, fetchImpl = fetch, logHead
       }
       return;
     }
+    // An absolute URL is a plain HTTP proxy request. The broker serves only
+    // CONNECT: agy-acp sets HTTPS_PROXY, not HTTP_PROXY.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(req.url ?? "")) {
+      logger("proxy request refused:", req.method);
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("agy-broker: plain HTTP proxy requests are refused; use CONNECT\n");
+      return;
+    }
     res.writeHead(404); res.end();
   });
 
-  // Tunnels go to any host on 443. That gives an agent nothing new: the
-  // broker's NetworkPolicy allows only DNS and port 443 outside private
-  // address space, as the runner's own policy does.
+  // The three Google hosts are terminated here. Every other host goes
+  // through agent-egress, or gets 403 without it (see the top of this file).
   server.on("connect", (req, socket, head) => {
-    const [host, portText] = (req.url ?? "").split(":");
-    const port = Number(portText);
-    if (port !== 443 || !host) { socket.end("HTTP/1.1 403 Forbidden\r\n\r\n"); return; }
     socket.on("error", () => socket.destroy());
-    if (TERMINATED_HOSTS.has(host)) {
+    const decision = connectDecision(req.url, egressProxy);
+    if (decision.action === "refuse") {
+      logger("CONNECT", decision.host ?? "-", "refuse", decision.reason);
+      refuseTunnel(socket, 403, `agy-broker: ${decision.reason}`);
+      return;
+    }
+    const { host } = decision;
+    if (decision.action === "terminate") {
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head?.length) socket.unshift(head);
       const secure = new tls.TLSSocket(socket, { isServer: true, ...tlsOptions, ALPNProtocols: ["http/1.1"] });
@@ -355,14 +490,7 @@ export function createBroker({ readToken, tlsOptions, fetchImpl = fetch, logHead
       terminated.emit("connection", secure);
       return;
     }
-    const upstream = net.connect(port, host, () => {
-      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      if (head?.length) upstream.write(head);
-      upstream.pipe(socket);
-      socket.pipe(upstream);
-    });
-    upstream.on("error", () => socket.destroy());
-    socket.on("close", () => upstream.destroy());
+    chainTunnel({ socket, head, host, proxy: egressProxy, logger, handshakeMs: egressHandshakeMs });
   });
 
   // closeAllConnections() reaches only the sockets that each server tracks.
@@ -380,6 +508,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const port = Number(process.env.AGY_BROKER_PORT ?? 8787);
   const listenHost = process.env.AGY_BROKER_HOST ?? "0.0.0.0";
   const tokenFile = process.env.AGY_BROKER_TOKEN_FILE ?? "/run/secrets/agy-broker/token.json";
+  // A bad value must not stop the broker (DIL-973): it logs the fault and
+  // refuses the hosts that it would chain.
+  let egressProxy = null;
+  try { egressProxy = parseEgressProxy(process.env.AGY_BROKER_EGRESS_PROXY); } catch (error) {
+    log(`${error.message}; other hosts get 403`);
+  }
+  log(egressProxy ? `other hosts go through ${egressProxy.host}:${egressProxy.port}` : "other hosts get 403");
   const server = createBroker({
     readToken: () => JSON.parse(readFileSync(tokenFile, "utf8")),
     tlsOptions: {
@@ -390,6 +525,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     // only: a value can carry a token.
     logHeaderNames: (process.env.AGY_BROKER_LOG_HEADER_NAMES ?? "1") === "1",
     allowlist: parseHeaderList(process.env.AGY_BROKER_FORWARD_HEADERS),
+    egressProxy,
   });
   // All addresses: the runner connects through a Service. The NetworkPolicy
   // decides who can connect (see the top of this file).
