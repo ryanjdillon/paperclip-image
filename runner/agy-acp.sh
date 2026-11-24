@@ -63,6 +63,9 @@ AGY_ACP_FORCE_FILE_STORAGE=1
 # egress proxy (agent-egress, DIL-888) and its allowlist. The server reads
 # its proxy only from the environment, so the fix is in the broker or in
 # its egress (DIL-993).
+# NODE_USE_ENV_PROXY=1 from /etc/profile (DIL-888) reaches this tree too, so
+# a Node process that agy starts also sends its HTTPS through the broker.
+# Before that variable, Node ignored HTTPS_PROXY and went direct.
 HTTPS_PROXY=$broker
 https_proxy=$broker
 # The broker host is not in NO_PROXY: a client never sends its connection to
