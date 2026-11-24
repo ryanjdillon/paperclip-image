@@ -217,7 +217,9 @@ export class SshRunner implements RemoteRunner {
       let settled = false;
 
       // Close this end of the pipes too: a process that inherited them could
-      // otherwise hold back the "close" event after ssh is gone.
+      // otherwise hold back the "close" event after ssh is gone. Output that
+      // is still unread in the pipes is lost, which is acceptable for a run
+      // that is ended anyway.
       const end = () => {
         child.kill("SIGKILL");
         child.stdout?.destroy();

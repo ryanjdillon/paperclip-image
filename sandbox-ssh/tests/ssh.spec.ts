@@ -155,7 +155,7 @@ describe("SshRunner", () => {
   it("returns at the local limit when a process still holds the pipes", async () => {
     // A stand-in for ssh whose remote side never stops: only the local kill ends the run.
     const stuck = ((_file: string, _args: readonly string[], options: object) =>
-      spawn("sh", ["-c", "sleep 25 & wait"], options)) as typeof spawn;
+      spawn("sh", ["-c", "sleep 20 & wait"], options)) as typeof spawn;
     const started = Date.now();
     const result = await new SshRunner(credentials, stuck).run(config, { command: "true", timeoutMs: 1 });
     expect(result.timedOut).toBe(true);
