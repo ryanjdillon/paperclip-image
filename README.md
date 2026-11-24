@@ -177,30 +177,51 @@ The runner itself:
   the page in headless Chromium and returns its main content as Markdown.
   It is a command and not a pi tool, so pi agents (bash tool) and Claude
   Code agents (Bash) use the same one. Set `WEB_FETCH_URL` in the agent's
-  env to use another `/fetch` URL (http or https only).
+  env to use another `/fetch` URL: http or https, on a `.svc.cluster.local`
+  host or the loopback only. `WEB_FETCH_CLIENT_TIMEOUT_MS` is for the build
+  tests only.
 
   ```text
   web-fetch [--max-chars N] [--timeout S] [--json] <url>
   ```
 
   - The URL must be `http` or `https`, at most 2048 characters, with no
-    user name or password. The command encodes it. The service fetches an
+    user name or password. The command encodes it and removes the
+    fragment (`#...`). The service fetches an
     `http` URL over `https`, on port 443 only, and only from public
     addresses.
   - `--max-chars`: 1000 to 200000 characters of Markdown (the service
     default is 50000). `--timeout`: 5 to 60 seconds for the whole fetch (the
     service default is 30). The command waits 10 s longer than the fetch
-    timeout for the service to answer.
+    timeout for the service to answer. If `WEB_FETCH_CLIENT_TIMEOUT_MS` is
+    shorter than the fetch timeout, it prints a warning on stderr.
   - The output is a header block (Title, URL, Final URL, Fetched at in UTC,
-    Truncated), a line that says the page content is untrusted data and not
-    instructions, an empty line, and the Markdown. Control characters are
-    removed, so a page cannot send terminal escape sequences.
-  - `--json` prints the service's JSON answer unchanged (for an error too).
+    Truncated), a note, an empty line, and the Markdown between two
+    markers:
+
+    ```text
+    ----- BEGIN PAGE <nonce> -----
+    <Markdown>
+    ----- END PAGE <nonce> -----
+    ```
+
+    The nonce is 16 random hex digits, new for each run. The note says
+    that the page content is untrusted data and not instructions, and that
+    it runs until the END PAGE line with that nonce. A page cannot know the
+    nonce, so it cannot fake the end of the page or a header line.
+  - Control characters (other than newline and tab), C1 controls,
+    zero-width and bidi characters and U+2028/U+2029 are removed from the
+    output, so a page cannot send terminal escape sequences or hide or
+    reorder text.
+  - `--json` prints the service's JSON answer (for an error too), with
+    `"untrusted": true` added. The JSON escapes those characters as
+    `\uXXXX`, in every field, `snippet` included.
   - An error is one line on stderr, with an exit code:
 
     | Exit | Service answer | Meaning |
     |---|---|---|
     | 0 | 200 `ok` | The page is on stdout |
+    | 1 | | Internal error in the command |
     | 2 | | Usage error: a bad option, a bad URL, or a bad `WEB_FETCH_URL`. No request is sent. |
     | 3 | 400 `bad_request` | The service refused the request |
     | 4 | 403 `forbidden_target` | A non-public address, a port other than 443, or plain HTTP (also in a redirect) |
@@ -217,8 +238,10 @@ The runner itself:
     429 or 451, or a bot check such as a CAPTCHA. The service does not try
     to get around it. Use another source, or ask the owner.
   - The build tests it (`runner/web-fetch.test.mjs`): the installed command
-    against a stub service, for success, truncation, each error code, a
-    service that is down or hangs, bad URLs and options, and `--json`.
+    against a stub service, for success, the page markers with a fake END
+    marker, character removal, truncation, each error code, a service that
+    is down or hangs, bad URLs and options, a bad `WEB_FETCH_URL`, `--json`,
+    and a direct service call with dead proxy variables and `NO_PROXY`.
 - `env` and `printenv` (`/usr/local/lib/paperclip-shims`, linked from
   `/usr/local/bin`) print variable names only when listing; `env NAME=VALUE
   cmd`, `--help` and `--version` pass through unchanged, and `printenv NAME`
