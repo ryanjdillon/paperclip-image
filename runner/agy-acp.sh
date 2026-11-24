@@ -1,7 +1,11 @@
 #!/bin/sh
 # Google Antigravity's ACP server, for gemini_local agents with agentCommand
 # `agy-acp` (DIL-963). The server signs in to Google through the agy-broker
-# sidecar (runner/agy-broker), which keeps the real token in its own container.
+# (runner/agy-broker), which keeps the real token in its own pod (DIL-973).
+# The runner reaches it through its Service. A NetworkPolicy admits only the
+# runner pods from the cluster (and kube-router admits the broker node's own
+# processes). An agent cannot take over the address, as it could on the
+# shared loopback of a sidecar.
 # This wrapper gives the server only dummy credentials, sends its traffic
 # through the broker, and makes it trust the broker's CA.
 #
@@ -16,7 +20,7 @@
 set -eu
 
 real=@AGY_REAL@
-broker=${AGY_BROKER_URL:-http://127.0.0.1:8787}
+broker=${AGY_BROKER_URL:-http://agy-broker.paperclip-agents.svc.cluster.local:8787}
 ca=${AGY_BROKER_CA:-/etc/paperclip-runner/agy/ca.crt}
 GEMINI_HOME=${GEMINI_HOME:-/home/node/.antigravity}
 
@@ -32,13 +36,17 @@ token_tmp="$state/.acp_token.json.$$"
 settings_tmp="$state/.settings.json.$$"
 bundle="$GEMINI_HOME/ca-bundle.crt"
 bundle_tmp="$bundle.$$"
+# A signal must run the EXIT trap, which removes the temporary files. sh
+# runs the EXIT trap on `exit`, but not when a signal kills it.
+trap 'exit 130' INT TERM HUP
 trap 'rm -f "$token_tmp" "$settings_tmp" "$bundle_tmp"' EXIT
 
 # Rewritten before every start, so that the server starts from known files:
 # a missing or changed token file or setting makes the server wait for a
 # browser sign-in until the run times out. The files hold no secret: the
-# broker serves dummy tokens and public client IDs.
-if ! curl -fsS --max-time 10 "$broker/dummy-credentials" >"$token_tmp"; then
+# broker serves dummy tokens and public client IDs. --noproxy: this request
+# goes to the broker itself, never through a proxy that the caller has set.
+if ! curl -fsS --noproxy '*' --max-time 10 "$broker/dummy-credentials" >"$token_tmp"; then
   echo "agy-acp: the broker at $broker does not answer" >&2
   exit 69
 fi
@@ -52,6 +60,8 @@ trap - EXIT
 AGY_ACP_FORCE_FILE_STORAGE=1
 HTTPS_PROXY=$broker
 https_proxy=$broker
+# The broker host is not in NO_PROXY: a client never sends its connection to
+# the proxy through the proxy, so the entry would change nothing.
 NO_PROXY=127.0.0.1,localhost
 no_proxy=$NO_PROXY
 HTTPLIB2_CA_CERTS=$bundle
