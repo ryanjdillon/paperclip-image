@@ -63,6 +63,7 @@ RUN apt-get update \
       jq \
       less \
       make \
+      netcat-openbsd \
       openssh-server \
       python3 \
       python3-venv \
@@ -234,10 +235,14 @@ RUN ln -s /usr/local/lib/paperclip-shims/env /usr/local/bin/env \
 COPY sshd_config /etc/ssh/sshd_config
 # git over SSH to GitHub on port 443, with pinned host keys; the deploy key
 # comes from the deployment (/run/secrets/git/skrap/key).
+# In a run, through the egress proxy (ssh-proxy-connect, DIL-888).
 COPY ssh_config_github.conf /etc/ssh/ssh_config.d/github.conf
+COPY --chmod=755 ssh-proxy-connect.sh /usr/local/bin/ssh-proxy-connect
 COPY github_known_hosts /etc/ssh/github_known_hosts
 COPY gitconfig /etc/gitconfig
 RUN grep -q '^Include /etc/ssh/ssh_config.d/\*.conf' /etc/ssh/ssh_config \
+ && ssh -G github.com | grep -qx 'proxycommand /usr/local/bin/ssh-proxy-connect %h %p' \
+ && nc -h 2>&1 | grep -q -- '-X proxy_protocol' \
  && ssh -G github.com | grep -qx 'port 443' \
  && ssh -G github.com | grep -qx 'hostname ssh.github.com' \
  && ssh -G github.com | grep -qx 'hostkeyalias github.com' \
