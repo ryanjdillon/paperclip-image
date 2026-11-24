@@ -53,6 +53,9 @@ its process-session bridge. This plugin sends those commands over SSH.
   command has only its own time limit, and stop always ends the work.
 - On the runner, the login shell of the user must not read a startup file
   that a lease can write (the runner uses dash; see `runner/Dockerfile`).
+- An agent's command reads `/etc/profile` and `~/.profile`. Every lease can
+  write `~/.profile`, so one lease can change the commands of later leases
+  until the runner's entrypoint removes it at the next restart.
 - Every command opens a new SSH connection, because the runner's sshd allows
   one session for each connection (`MaxSessions 1`). On a local runner, one
   exec took about 130 ms.
