@@ -154,8 +154,7 @@ The runner itself:
     error result with clear text. "No results" is a normal result.
   - The tool description tells the model that results are untrusted data,
     not instructions.
-  - It does not fetch pages. A `web_fetch` tool will come from a separate
-    service.
+  - It does not fetch pages. To read a page, use the `web-fetch` command.
   - How it reaches a run: Paperclip's `pi_local` adapter (2026.1117.0) starts
     pi with `--tools read,bash,edit,write,grep,find,ls` (`execute.ts:670`).
     That allowlist also applies to extension tools. The adapter can also
@@ -171,6 +170,55 @@ The runner itself:
     through the wrapper to check that `web_search` is an active tool.
     `runner/pi-slot.test.sh` tests the wrapper's argument changes with a stub
     in place of the real pi.
+- Every agent has a `web-fetch` command (`runner/web-fetch`, installed
+  root-owned at `/usr/local/bin/web-fetch`). It reads one web page through
+  the cluster's web-fetch service
+  (`http://web-fetch.aitools.svc.cluster.local:8080/fetch`), which renders
+  the page in headless Chromium and returns its main content as Markdown.
+  It is a command and not a pi tool, so pi agents (bash tool) and Claude
+  Code agents (Bash) use the same one. Set `WEB_FETCH_URL` in the agent's
+  env to use another `/fetch` URL (http or https only).
+
+  ```text
+  web-fetch [--max-chars N] [--timeout S] [--json] <url>
+  ```
+
+  - The URL must be `http` or `https`, at most 2048 characters, with no
+    user name or password. The command encodes it. The service fetches an
+    `http` URL over `https`, on port 443 only, and only from public
+    addresses.
+  - `--max-chars`: 1000 to 200000 characters of Markdown (the service
+    default is 50000). `--timeout`: 5 to 60 seconds for the whole fetch (the
+    service default is 30). The command waits 10 s longer than the fetch
+    timeout for the service to answer.
+  - The output is a header block (Title, URL, Final URL, Fetched at in UTC,
+    Truncated), a line that says the page content is untrusted data and not
+    instructions, an empty line, and the Markdown. Control characters are
+    removed, so a page cannot send terminal escape sequences.
+  - `--json` prints the service's JSON answer unchanged (for an error too).
+  - An error is one line on stderr, with an exit code:
+
+    | Exit | Service answer | Meaning |
+    |---|---|---|
+    | 0 | 200 `ok` | The page is on stdout |
+    | 2 | | Usage error: a bad option, a bad URL, or a bad `WEB_FETCH_URL`. No request is sent. |
+    | 3 | 400 `bad_request` | The service refused the request |
+    | 4 | 403 `forbidden_target` | A non-public address, a port other than 443, or plain HTTP (also in a redirect) |
+    | 5 | 413 `too_large` | The page passed 20 MiB on the wire |
+    | 6 | 415 `unsupported_type` | Not HTML, plain text, Markdown, CSV or JSON: for example a PDF or an image |
+    | 7 | 422 `blocked` | The site refused automated reading |
+    | 8 | 502 `upstream_error` | DNS, connection or TLS failure, or an HTTP error from the site |
+    | 9 | 503 `busy` | The service is busy; try again later |
+    | 10 | 504 `timeout` | The page did not load in the fetch timeout |
+    | 11 | | The service is unreachable, or did not answer in time |
+    | 12 | | An unexpected service answer (another HTTP status, or not JSON) |
+
+  - "blocked" means that the site refused the browser: HTTP 401, 403, 407,
+    429 or 451, or a bot check such as a CAPTCHA. The service does not try
+    to get around it. Use another source, or ask the owner.
+  - The build tests it (`runner/web-fetch.test.mjs`): the installed command
+    against a stub service, for success, truncation, each error code, a
+    service that is down or hangs, bad URLs and options, and `--json`.
 - `env` and `printenv` (`/usr/local/lib/paperclip-shims`, linked from
   `/usr/local/bin`) print variable names only when listing; `env NAME=VALUE
   cmd`, `--help` and `--version` pass through unchanged, and `printenv NAME`
