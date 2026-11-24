@@ -120,11 +120,14 @@ The runner itself:
     `http://agent-egress.paperclip-agents.svc.cluster.local:3128`). A Gemini
     agent's git, curl and Node requests thus get the same allowlist as the
     other engines. A refusal from that proxy reaches the client as 403, and
-    a proxy fault as 502 or 504. With `AGY_BROKER_EGRESS_PROXY` set empty,
-    the broker refuses those hosts with 403. An invalid value has the same
-    effect, and the broker logs it. The broker opens no direct tunnel: its
-    own connections go only to the three Google hosts. It refuses another
-    port, a host that is not a DNS name, and a plain HTTP proxy request.
+    a proxy fault as 502. A proxy that has not answered within 15 s in
+    total gives 504. With `AGY_BROKER_EGRESS_PROXY` set empty, the broker
+    refuses those hosts with 403. An invalid value has the same effect, and
+    the broker logs it; the value needs an explicit port other than 80. The
+    broker opens no direct tunnel: its own connections go only to the three
+    Google hosts. It refuses another port, a host that is not a DNS name, an
+    IPv4 address in any form (dotted, decimal, octal or hex), and a plain
+    HTTP proxy request.
   - `agy-acp` sets `NO_PROXY` to the runner's list, so cluster names stay
     direct, as for the other engines.
   - An agent can still send prompts through the broker. It cannot read the
