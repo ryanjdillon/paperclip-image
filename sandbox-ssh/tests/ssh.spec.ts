@@ -9,6 +9,7 @@ import {
   buildRemoteScript,
   clampTimeout,
   CredentialFiles,
+  LOCAL_TIMEOUT_GRACE_MS,
   MAX_OUTPUT_BYTES,
   shellQuote,
   sshArgs,
@@ -150,6 +151,16 @@ describe("SshRunner", () => {
     });
     expect(result.timedOut).toBe(true);
   }, 20_000);
+
+  it("returns at the local limit when a process still holds the pipes", async () => {
+    // A stand-in for ssh whose remote side never stops: only the local kill ends the run.
+    const stuck = ((_file: string, _args: readonly string[], options: object) =>
+      spawn("sh", ["-c", "sleep 25 & wait"], options)) as typeof spawn;
+    const started = Date.now();
+    const result = await new SshRunner(credentials, stuck).run(config, { command: "true", timeoutMs: 1 });
+    expect(result.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(LOCAL_TIMEOUT_GRACE_MS + 3000);
+  }, 25_000);
 
   it("ends a command with too much output", async () => {
     await expect(
