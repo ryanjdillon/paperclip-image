@@ -241,21 +241,30 @@ COPY --chmod=755 ssh-proxy-connect.sh /usr/local/bin/ssh-proxy-connect
 COPY github_known_hosts /etc/ssh/github_known_hosts
 COPY gitconfig /etc/gitconfig
 # ssh-proxy-connect, with a stub netcat that prints its arguments: direct
-# without a proxy, a CONNECT tunnel with one, and a refusal for a proxy URL
-# with credentials.
+# without a proxy, a CONNECT tunnel with https_proxy and with HTTPS_PROXY
+# only, and for a proxy URL with credentials exit code 64 without running
+# netcat.
 RUN sh -n /usr/local/bin/ssh-proxy-connect \
  && printf '#!/bin/sh\necho "$*"\n' >/tmp/nc-stub && chmod 755 /tmp/nc-stub \
  && [ "$(/usr/bin/env -u https_proxy -u HTTPS_PROXY SSH_PROXY_CONNECT_NC=/tmp/nc-stub \
         ssh-proxy-connect ssh.github.com 443)" = "-w 15 ssh.github.com 443" ] \
  && [ "$(/usr/bin/env -u HTTPS_PROXY https_proxy=http://proxy.test:3128/ SSH_PROXY_CONNECT_NC=/tmp/nc-stub \
         ssh-proxy-connect ssh.github.com 443)" = "-w 15 -X connect -x proxy.test:3128 ssh.github.com 443" ] \
- && ! /usr/bin/env https_proxy=http://u:p@proxy.test:3128 SSH_PROXY_CONNECT_NC=/tmp/nc-stub \
-        ssh-proxy-connect ssh.github.com 443 2>/dev/null \
+ && [ "$(/usr/bin/env -u https_proxy HTTPS_PROXY=http://proxy.test:3128 SSH_PROXY_CONNECT_NC=/tmp/nc-stub \
+        ssh-proxy-connect ssh.github.com 443)" = "-w 15 -X connect -x proxy.test:3128 ssh.github.com 443" ] \
+ && { out=$(/usr/bin/env -u HTTPS_PROXY https_proxy=http://u:p@proxy.test:3128 SSH_PROXY_CONNECT_NC=/tmp/nc-stub \
+        ssh-proxy-connect ssh.github.com 443 2>/dev/null); rc=$?; \
+      [ "$rc" -eq 64 ] && [ -z "$out" ]; } \
  && rm /tmp/nc-stub \
  && /usr/bin/nc.openbsd -h 2>&1 | grep -q -- '-X proxy_protocol'
 RUN grep -q '^Include /etc/ssh/ssh_config.d/\*.conf' /etc/ssh/ssh_config \
  && ssh -G github.com | grep -qx 'proxycommand /usr/local/bin/ssh-proxy-connect %h %p' \
  && ssh -G github.com | grep -qx 'serveraliveinterval 10' \
+ && ssh -G github.com | grep -qx 'serveralivecountmax 3' \
+ && ssh -G ssh.github.com | grep -qx 'proxycommand /usr/local/bin/ssh-proxy-connect %h %p' \
+ && ssh -G ssh.github.com | grep -qx 'port 443' \
+ && ssh -G ssh.github.com | grep -qx 'hostkeyalias github.com' \
+ && ssh -G ssh.github.com | grep -qx 'stricthostkeychecking true' \
  && ssh -G github.com | grep -qx 'port 443' \
  && ssh -G github.com | grep -qx 'hostname ssh.github.com' \
  && ssh -G github.com | grep -qx 'hostkeyalias github.com' \
