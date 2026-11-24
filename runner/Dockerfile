@@ -240,9 +240,22 @@ COPY ssh_config_github.conf /etc/ssh/ssh_config.d/github.conf
 COPY --chmod=755 ssh-proxy-connect.sh /usr/local/bin/ssh-proxy-connect
 COPY github_known_hosts /etc/ssh/github_known_hosts
 COPY gitconfig /etc/gitconfig
+# ssh-proxy-connect, with a stub netcat that prints its arguments: direct
+# without a proxy, a CONNECT tunnel with one, and a refusal for a proxy URL
+# with credentials.
+RUN sh -n /usr/local/bin/ssh-proxy-connect \
+ && printf '#!/bin/sh\necho "$*"\n' >/tmp/nc-stub && chmod 755 /tmp/nc-stub \
+ && [ "$(/usr/bin/env -u https_proxy -u HTTPS_PROXY SSH_PROXY_CONNECT_NC=/tmp/nc-stub \
+        ssh-proxy-connect ssh.github.com 443)" = "-w 15 ssh.github.com 443" ] \
+ && [ "$(/usr/bin/env -u HTTPS_PROXY https_proxy=http://proxy.test:3128/ SSH_PROXY_CONNECT_NC=/tmp/nc-stub \
+        ssh-proxy-connect ssh.github.com 443)" = "-w 15 -X connect -x proxy.test:3128 ssh.github.com 443" ] \
+ && ! /usr/bin/env https_proxy=http://u:p@proxy.test:3128 SSH_PROXY_CONNECT_NC=/tmp/nc-stub \
+        ssh-proxy-connect ssh.github.com 443 2>/dev/null \
+ && rm /tmp/nc-stub \
+ && /usr/bin/nc.openbsd -h 2>&1 | grep -q -- '-X proxy_protocol'
 RUN grep -q '^Include /etc/ssh/ssh_config.d/\*.conf' /etc/ssh/ssh_config \
  && ssh -G github.com | grep -qx 'proxycommand /usr/local/bin/ssh-proxy-connect %h %p' \
- && nc -h 2>&1 | grep -q -- '-X proxy_protocol' \
+ && ssh -G github.com | grep -qx 'serveraliveinterval 10' \
  && ssh -G github.com | grep -qx 'port 443' \
  && ssh -G github.com | grep -qx 'hostname ssh.github.com' \
  && ssh -G github.com | grep -qx 'hostkeyalias github.com' \
