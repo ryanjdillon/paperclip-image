@@ -175,7 +175,13 @@ settings, memory and extensions, its user-scope MCP servers, pi's user config
 and nixpkgs config, registry, profiles and fetcher cache, Python's user
 site-packages and pip/uv config, and rebuilds `~/.ssh`; sshd never runs
 `~/.ssh/rc`. The agent user's login shell is dash, so sshd's `sh -c` reads
-no startup file: with bash, `~/.bashrc` ran before every SSH command. Python
+no startup file: with bash, `~/.bashrc` ran before every SSH command. The
+dash shell protects only commands that source no profile, such as the
+sandbox-ssh driver's housekeeping. Paperclip's ssh driver sources
+`/etc/profile`, `~/.profile`, `~/.bash_profile` (or else `~/.bashrc`) and
+`~/.zprofile` before each command. sandbox-ssh sources `/etc/profile` and
+`~/.profile` before an agent's command. So a startup file that one run
+writes still applies to later runs until the next restart. Python
 ignores user site-packages anyway (`PYTHONNOUSERSITE`).
 Workspaces and session transcripts (`~/.claude/projects`, needed to resume)
 are kept. The host private key is readable by runs too (same UID).

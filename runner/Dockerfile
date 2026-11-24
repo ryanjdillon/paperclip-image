@@ -187,8 +187,11 @@ RUN /usr/local/bin/nix-store-check --build /tmp/nix-store-check \
 # 20100 is outside the usual ranges for system, login, subordinate (100000+)
 # and nixbld (30000+) IDs.
 # The login shell is dash, not bash: sshd runs every command through it, and
-# bash then runs ~/.bashrc first. Every run can write the home, so one run
-# could take over the commands of later runs. `dash -c` reads no file.
+# bash then runs ~/.bashrc first. Every run can write the home, so a profile
+# could change commands that must not read one, such as the sandbox-ssh
+# driver's own housekeeping. `dash -c` reads no file. Commands that source the
+# profiles themselves still read them: Paperclip's ssh driver and the
+# agent commands of sandbox-ssh do.
 RUN groupmod -g 20100 node \
  && usermod -u 20100 -g 20100 -s /bin/sh node \
  && test "$(id -u node):$(id -g node)" = 20100:20100 \
