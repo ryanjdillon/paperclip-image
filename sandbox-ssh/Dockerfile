@@ -4,7 +4,7 @@
 
 # The build stage runs on the build machine's own architecture: its output is
 # plain JavaScript, so every platform gets the same files.
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:0998f9a7af5bba96fb32e2aeafde650a625012cb194a57e7f3939bf3e592721f AS build
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:190bcf5115694c9d3c4d654a1aa88177d77600a06d67972fd7bf4cf224f7692c AS build
 WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
