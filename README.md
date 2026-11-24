@@ -113,7 +113,20 @@ The runner itself:
   - The broker terminates TLS for `oauth2.googleapis.com` and the two
     `cloudcode-pa` hosts only. It swaps the dummy token for the real one on
     `v1internal` calls and refuses all other requests to those hosts. It does
-    not follow redirects. It tunnels other hosts unchanged.
+    not follow redirects.
+  - agy's child processes, the commands it runs for an agent, inherit the
+    broker as their proxy. So the broker sends a CONNECT to any other host
+    on 443 through the egress proxy (`AGY_BROKER_EGRESS_PROXY`, default
+    `http://agent-egress.paperclip-agents.svc.cluster.local:3128`). A Gemini
+    agent's git, curl and Node requests thus get the same allowlist as the
+    other engines. A refusal from that proxy reaches the client as 403, and
+    a proxy fault as 502 or 504. With `AGY_BROKER_EGRESS_PROXY` set empty,
+    the broker refuses those hosts with 403. An invalid value has the same
+    effect, and the broker logs it. The broker opens no direct tunnel: its
+    own connections go only to the three Google hosts. It refuses another
+    port, a host that is not a DNS name, and a plain HTTP proxy request.
+  - `agy-acp` sets `NO_PROXY` to the runner's list, so cluster names stay
+    direct, as for the other engines.
   - An agent can still send prompts through the broker. It cannot read the
     real token or reach other Google APIs.
   - `GEMINI_HOME` defaults to `/home/node/.antigravity`. It must not be under
@@ -199,7 +212,8 @@ The runner itself:
   `ssh-proxy-connect` connects directly. It refuses a proxy URL with
   credentials. The variables are defaults, not a boundary: the deployment's
   NetworkPolicy is. `agy-acp` points agy and its child processes at the
-  agy-broker instead, which bypasses this proxy (DIL-993).
+  agy-broker instead. The broker sends every host other than agy's Google
+  hosts on to this proxy (DIL-993).
 - Base tools: git, curl, jq, python3 (with venv), make, unzip, less, file,
   xz, ripgrep and fd. Anything more comes from the repository's own flake.
 - Nix (single-user, static binary at `/usr/local/bin/nix`, flakes on): mount
