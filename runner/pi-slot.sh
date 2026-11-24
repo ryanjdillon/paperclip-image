@@ -21,35 +21,55 @@ real=@PI_REAL@
 # PI_CODING_AGENT_DIR at its own directory, so neither auto-discovery nor a
 # tool that is not on the list reaches a run. So, for an agent run (the
 # first argument is an option, not a subcommand such as `install`), add
-# `-e <extension>` and add web_search to a `--tools`/`-t` list. With
-# `--no-extensions` or `--no-tools` the arguments stay as they are.
+# `-e <extension>` and add web_search to each `--tools`/`-t` list.
+#
+# The flags, from pi 0.74's dist/cli/args.js: `--tools`/`-t` take the next
+# argument as the list (:74); `--no-tools`/`-nt` (:68) and
+# `--no-extensions`/`-ne` (:107) are real flags. pi does not read
+# `--tools=x` as a tool list: a `--name=value` argument becomes an unknown
+# (extension) flag (:150-153), so the wrapper leaves it alone too.
+#
+# The arguments stay as they are with `--no-extensions` or `--no-tools`. An
+# empty list (`--tools ""`) stays empty. The wrapper stops reading options at
+# `--`; the arguments after it pass through unchanged.
 ext=/opt/pi-extensions/web-search.ts
 case "${1:-}" in
   -*)
     add=1
     for a do
       case "$a" in
+        --) break ;;
         --no-extensions | -ne | --no-tools | -nt) add=0 ;;
       esac
     done
     if [ "$add" = 1 ] && [ -r "$ext" ]; then
       tools_next=0
       first=1
+      rest=0
       for a do
         if [ "$first" = 1 ]; then
           set -- -e "$ext"
           first=0
         fi
-        if [ "$tools_next" = 1 ]; then
-          case ",$a," in
-            *,web_search,*) ;;
-            *) a="$a,web_search" ;;
+        if [ "$rest" = 1 ]; then
+          :
+        elif [ "$tools_next" = 1 ]; then
+          # A list with at least one name, without web_search.
+          case "$a" in
+            *[!,[:space:]]*)
+              case ",$a," in
+                *,web_search,*) ;;
+                *) a="$a,web_search" ;;
+              esac
+              ;;
           esac
           tools_next=0
+        else
+          case "$a" in
+            --) rest=1 ;;
+            --tools | -t) tools_next=1 ;;
+          esac
         fi
-        case "$a" in
-          --tools | -t) tools_next=1 ;;
-        esac
         set -- "$@" "$a"
       done
     fi

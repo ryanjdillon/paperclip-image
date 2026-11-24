@@ -110,13 +110,20 @@ RUN real=$(readlink -f /usr/local/bin/pi) \
 # The tests run here: CI only builds this image, so a failed test fails the
 # build. They load it through pi's own loader, run it against a stub SearXNG
 # (format, caps, errors, abort and timeout), and start pi through the wrapper
-# offline to check that web_search is an active tool. COPY --chmod also gives
-# the new directory mode 644, so the RUN sets it to 755.
+# offline to check that web_search is an active tool. pi-slot.test.sh tests
+# the wrapper's argument changes on a copy of the installed wrapper whose real
+# pi is a stub that prints its arguments. COPY --chmod also gives the new
+# directory mode 644, so the RUN sets it to 755.
 COPY --chown=0:0 --chmod=644 pi-extensions/web-search.ts /opt/pi-extensions/web-search.ts
-COPY pi-extensions/web-search.test.mjs /tmp/web-search-test/web-search.test.mjs
+COPY pi-extensions/web-search.test.mjs pi-slot.test.sh /tmp/web-search-test/
 RUN chmod 755 /opt/pi-extensions \
  && test "$(stat -c '%a %U %G' /opt/pi-extensions /opt/pi-extensions/web-search.ts)" = "$(printf '755 root root\n644 root root')" \
  && cd /tmp/web-search-test \
+ && printf '#!/bin/sh\nfor a do printf "[%%s]" "$a"; done\necho\n' >argv-stub \
+ && sed "s|^real=.*|real=/tmp/web-search-test/argv-stub|" /usr/local/bin/pi >pi-under-test \
+ && chmod 755 argv-stub pi-under-test \
+ && grep -qx 'real=/tmp/web-search-test/argv-stub' pi-under-test \
+ && sh pi-slot.test.sh ./pi-under-test /opt/pi-extensions/web-search.ts \
  && PI_PACKAGE_DIR="$(npm root -g)/@earendil-works/pi-coding-agent" \
     WEB_SEARCH_EXTENSION=/opt/pi-extensions/web-search.ts \
     node --test web-search.test.mjs \
