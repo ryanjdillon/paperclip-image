@@ -84,13 +84,28 @@ The runner itself:
 - Google Antigravity's ACP server (`agy-acp`, `runner/agy-acp.sh`), for a
   `gemini_local` agent with `agentCommand: agy-acp`. It uses a Google sign-in
   (a Gemini subscription), so it needs no API key.
-  - The real Google token stays in the `agy-broker` sidecar
+  - The real Google token stays in the `agy-broker` pod
     (`runner/agy-broker`). Every agent on the runner shares one user, so a
     token in the agent container would be readable by all of them.
-  - Run the sidecar from this image with
+  - Run the broker from this image, in its own pod, with
     `node /usr/local/lib/agy-broker/agy-broker.mjs`. It listens on
-    `127.0.0.1:8787`. It reads `token.json`, `tls.key` and `tls.crt` from
-    `/run/secrets/agy-broker/`.
+    `0.0.0.0:8787` (`AGY_BROKER_HOST`, `AGY_BROKER_PORT`). It reads
+    `token.json`, `tls.key` and `tls.crt` from `/run/secrets/agy-broker/`.
+  - The broker does not authenticate its callers. Give it a Service named
+    `agy-broker` in `paperclip-agents`, and a NetworkPolicy that admits only
+    the runner pods. kube-router still admits processes on the broker's own
+    node, so caller authentication is a follow-up. `agy-acp` uses
+    `http://agy-broker.paperclip-agents.svc.cluster.local:8787`. A run comes
+    in over SSH and does not see the container environment, so this default
+    is in the wrapper.
+  - `AGY_BROKER_LOG_HEADER_NAMES` (default `1`) logs the request header
+    names of each new set on a `v1internal` forward, never the values.
+    `AGY_BROKER_FORWARD_HEADERS` (a comma list) then forwards only those
+    names. Empty, the broker forwards all names except hop-by-hop headers,
+    `proxy-authorization`, method overrides, `x-goog-api-key` and
+    `x-goog-user-project`.
+  - The broker holds at most 64 MiB of request bodies at one time, across
+    requests. Above that it answers 503.
   - `agy-acp` needs the broker's CA at `/etc/paperclip-runner/agy/ca.crt`.
     Before every start, it writes the broker's dummy credentials and
     `{"auth": {"type": "oauth-personal"}}` to `$GEMINI_HOME/antigravity-acp/`.
