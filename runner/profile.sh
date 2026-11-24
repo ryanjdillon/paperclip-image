@@ -22,3 +22,12 @@ export PYTHONNOUSERSITE=1
 # env/printenv that list names only (env-names.sh); a dev shell that puts its
 # own coreutils first on PATH re-prepends this directory (skrap's flake does).
 export PAPERCLIP_SHIM_DIR=/usr/local/lib/paperclip-shims
+# Egress (DIL-888): HTTPS goes through the cluster's CONNECT proxy, which logs
+# each host and holds the allowlist. The runner's NetworkPolicy is the
+# boundary, not these variables. Cluster addresses (the AI gateway, the
+# runner ingress, the agy-broker) stay direct. git over SSH uses the proxy
+# through ssh-proxy-connect. agy-acp sets its own HTTPS_PROXY (the broker).
+export https_proxy=http://agent-egress.paperclip-agents.svc.cluster.local:3128
+export HTTPS_PROXY=$https_proxy
+export no_proxy=localhost,127.0.0.1,::1,.cluster.local
+export NO_PROXY=$no_proxy
