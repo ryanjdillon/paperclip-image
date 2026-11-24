@@ -216,9 +216,16 @@ export class SshRunner implements RemoteRunner {
       let overflow = false;
       let settled = false;
 
+      // Close this end of the pipes too: a process that inherited them could
+      // otherwise hold back the "close" event after ssh is gone.
+      const end = () => {
+        child.kill("SIGKILL");
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      };
       const timer = setTimeout(() => {
         localTimeout = true;
-        child.kill("SIGKILL");
+        end();
       }, timeoutMs + LOCAL_TIMEOUT_GRACE_MS);
 
       const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
@@ -226,7 +233,7 @@ export class SshRunner implements RemoteRunner {
         size += chunk.length;
         if (size > MAX_OUTPUT_BYTES) {
           overflow = true;
-          child.kill("SIGKILL");
+          end();
           return;
         }
         chunks.push(chunk);
