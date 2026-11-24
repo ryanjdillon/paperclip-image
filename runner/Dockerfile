@@ -167,6 +167,14 @@ RUN dir="/opt/antigravity/${AGY_ACP_VERSION}" \
  && chmod 755 /usr/local/bin/agy-acp \
  && rm /tmp/agy-acp.sh \
  && ! grep -q @AGY_REAL@ /usr/local/bin/agy-acp
+# The filter in front of the server that removes the MCP servers
+# (runner/agy-acp, DIL-1006). Its tests run here, so a failed test fails the
+# build.
+COPY agy-acp /usr/local/lib/agy-acp
+RUN cd /usr/local/lib/agy-acp \
+ && node --test mcp-filter.test.mjs \
+ && rm mcp-filter.test.mjs \
+ && chmod -R go-w,a+rX /usr/local/lib/agy-acp
 # The token broker for agy-acp (runner/agy-broker), run in its own pod from
 # this image. Its tests run here: CI only builds this image, so a failed test fails
 # the build.
