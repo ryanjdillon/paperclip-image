@@ -347,6 +347,11 @@ export function parseEgressProxy(text) {
   if (text === "") return null;
   let url;
   try { url = new URL(text); } catch { throw new Error("AGY_BROKER_EGRESS_PROXY is not a URL"); }
+  // URL drops a default port, so http://host:80 and http://host look the
+  // same here. Both are refused: agent-egress listens on 3128.
+  if (url.protocol === "http:" && !url.port) {
+    throw new Error("AGY_BROKER_EGRESS_PROXY needs an explicit port other than 80 (agent-egress listens on 3128)");
+  }
   const port = Number(url.port);
   if (url.protocol !== "http:" || !url.hostname || !port || url.username || url.password
     || (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) {
@@ -356,9 +361,14 @@ export function parseEgressProxy(text) {
 }
 
 // A DNS name: letters, digits, hyphens and dots, as a CONNECT authority from
-// agy, git or curl has. IP literals in brackets (IPv6), user info, spaces and
-// control characters never reach agent-egress or the log.
+// agy, git or curl has. The pattern refuses IPv6 literals (brackets), user
+// info, percent-encoding, spaces and control characters. IPv4_LITERAL refuses
+// what the pattern lets through but a resolver reads as an IPv4 address: a
+// last label of digits only or 0x and hex digits. That covers dotted
+// (1.2.3.4), short (127.1), decimal (2130706433), octal (0177.0.0.1) and hex
+// (0x7f000001) forms. No real top-level domain is all digits or starts 0x.
 const HOST_NAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
+const IPV4_LITERAL = /(?:^|\.)(?:\d+|0x[0-9a-f]*)$/;
 
 /**
  * What to do with a CONNECT to `authority` (host:port): terminate it for
@@ -371,6 +381,7 @@ export function connectDecision(authority, proxy) {
   const host = colon > 0 ? text.slice(0, colon).toLowerCase() : "";
   const portText = colon > 0 ? text.slice(colon + 1) : "";
   if (!HOST_NAME.test(host)) return { action: "refuse", reason: "not a host name" };
+  if (IPV4_LITERAL.test(host)) return { action: "refuse", host, reason: "an IP address, not a host name" };
   if (portText !== "443") return { action: "refuse", host, reason: "only port 443" };
   if (TERMINATED_HOSTS.has(host)) return { action: "terminate", host };
   if (!proxy) return { action: "refuse", host, reason: `${host} is not one of agy's Google hosts, and no egress proxy is set` };
@@ -389,25 +400,33 @@ function refuseTunnel(socket, status, message) {
 /**
  * Opens a tunnel to host:443 through the egress proxy and joins it to the
  * client's socket. The proxy's refusal goes back to the client as 403, a
- * fault or a silent proxy as 502 or 504. The tunnel carries TLS from end to
- * end; the broker sees only the host name.
+ * fault as 502, and a proxy that has not answered within handshakeMs, in
+ * total, as 504. The tunnel carries TLS from end to end; the broker sees only
+ * the host name.
  */
 export function chainTunnel({ socket, head, host, proxy, logger = log, handshakeMs = EGRESS_HANDSHAKE_MS }) {
   const upstream = net.connect(proxy.port, proxy.host);
   let reply = Buffer.alloc(0);
   // handshake, then open (joined) or failed (the client has its reply).
   let state = "handshake";
+  // One deadline for the whole handshake: a proxy that sends a byte now and
+  // then cannot hold the client open.
+  const deadline = setTimeout(() => fail(504, "did not answer in time"), handshakeMs);
   const fail = (status, why) => {
     if (state !== "handshake") return;
     state = "failed";
+    clearTimeout(deadline);
     logger("CONNECT", host, "chain failed", why);
     upstream.destroy();
     if (!socket.destroyed) refuseTunnel(socket, status, `agy-broker: agent-egress ${why} for ${host}:443`);
   };
-  const lost = (why) => { if (state === "open") socket.destroy(); else fail(502, why); };
-  upstream.setTimeout(handshakeMs, () => fail(504, "did not answer"));
-  upstream.on("error", (error) => lost(`is not reachable (${error.code ?? "error"})`));
-  upstream.on("close", () => lost("closed the connection"));
+  // In the open state, an error cuts the client too. A clean close needs
+  // nothing: pipe() ends the client's socket after the last byte, and a
+  // destroy here would drop the tail of a download.
+  upstream.on("error", (error) => {
+    if (state === "open") socket.destroy(); else fail(502, `is not reachable (${error.code ?? "error"})`);
+  });
+  upstream.on("close", () => fail(502, "closed the connection"));
   socket.on("close", () => upstream.destroy());
   upstream.on("connect", () => {
     upstream.write(`CONNECT ${host}:443 HTTP/1.1\r\nHost: ${host}:443\r\n\r\n`);
@@ -426,7 +445,7 @@ export function chainTunnel({ socket, head, host, proxy, logger = log, handshake
       return;
     }
     state = "open";
-    upstream.setTimeout(0);
+    clearTimeout(deadline);
     logger("CONNECT", host, "chain");
     socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     const rest = reply.subarray(end + 4);
@@ -437,6 +456,21 @@ export function chainTunnel({ socket, head, host, proxy, logger = log, handshake
   };
   upstream.on("data", onData);
   return upstream;
+}
+
+/**
+ * The egress proxy for the process, from the environment. An invalid value
+ * must not stop the broker (DIL-973): it logs the fault, and the broker
+ * refuses the hosts that it would chain.
+ */
+export function egressProxyFromEnv(env = process.env, logger = log) {
+  let proxy = null;
+  try { proxy = parseEgressProxy(env.AGY_BROKER_EGRESS_PROXY); } catch (error) {
+    logger(`${error.message}; other hosts get 403`);
+    return null;
+  }
+  logger(proxy ? `other hosts go through ${proxy.host}:${proxy.port}` : "other hosts get 403");
+  return proxy;
 }
 
 export function createBroker({
@@ -508,13 +542,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const port = Number(process.env.AGY_BROKER_PORT ?? 8787);
   const listenHost = process.env.AGY_BROKER_HOST ?? "0.0.0.0";
   const tokenFile = process.env.AGY_BROKER_TOKEN_FILE ?? "/run/secrets/agy-broker/token.json";
-  // A bad value must not stop the broker (DIL-973): it logs the fault and
-  // refuses the hosts that it would chain.
-  let egressProxy = null;
-  try { egressProxy = parseEgressProxy(process.env.AGY_BROKER_EGRESS_PROXY); } catch (error) {
-    log(`${error.message}; other hosts get 403`);
-  }
-  log(egressProxy ? `other hosts go through ${egressProxy.host}:${egressProxy.port}` : "other hosts get 403");
+  const egressProxy = egressProxyFromEnv();
   const server = createBroker({
     readToken: () => JSON.parse(readFileSync(tokenFile, "utf8")),
     tlsOptions: {
