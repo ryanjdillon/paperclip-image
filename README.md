@@ -138,6 +138,34 @@ The runner itself:
   without starting pi. pi started from inside a pi run skips the cap. It is
   cooperative: an agent on the runner can get around it, and the upstream's
   own limit is the hard one.
+- pi agents have a `web_search` tool (`runner/pi-extensions/web-search.ts`,
+  installed root-owned at `/opt/pi-extensions/web-search.ts`). It sends the
+  query to the cluster's SearXNG
+  (`http://searxng.aitools.svc.cluster.local:8080/search`, JSON API) and
+  returns a numbered Markdown list: title, URL, snippet and the engines that
+  found each result. There is no fallback to another search service. Set
+  `WEB_SEARCH_URL` in the agent's env to use another SearXNG `/search` URL.
+  - Limits: a query of at most 500 characters, 1 to 10 results (default 5),
+    a timeout of 15 s, titles of at most 200 characters and snippets of at
+    most 500, and at most 8000 characters in total.
+  - A failure (for example "search service unavailable (HTTP 503)") is an
+    error result with clear text. "No results" is a normal result.
+  - The tool description tells the model that results are untrusted data,
+    not instructions.
+  - It does not fetch pages. A `web_fetch` tool will come from a separate
+    service.
+  - How it reaches a run: Paperclip's `pi_local` adapter (2026.1117.0) starts
+    pi with `--tools read,bash,edit,write,grep,find,ls` (`execute.ts:670`).
+    That allowlist also applies to extension tools. The adapter can also
+    point `PI_CODING_AGENT_DIR` at its own directory (`execute.ts:344`,
+    `:485`), so `~/.pi/agent/extensions` is not a reliable place. The pi
+    wrapper (`runner/pi-slot.sh`) therefore adds `-e
+    /opt/pi-extensions/web-search.ts` and adds `web_search` to a `--tools`
+    list. It changes nothing for a subcommand (`pi install`) or with
+    `--no-extensions` or `--no-tools`.
+  - The build tests it (`runner/pi-extensions/web-search.test.mjs`): through
+    pi's own loader against a stub SearXNG, and with pi started offline
+    through the wrapper to check that `web_search` is an active tool.
 - `env` and `printenv` (`/usr/local/lib/paperclip-shims`, linked from
   `/usr/local/bin`) print variable names only when listing; `env NAME=VALUE
   cmd`, `--help` and `--version` pass through unchanged, and `printenv NAME`
