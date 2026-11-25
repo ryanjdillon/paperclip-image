@@ -167,8 +167,8 @@ RUN dir="/opt/antigravity/${AGY_ACP_VERSION}" \
  && chmod 755 /usr/local/bin/agy-acp \
  && rm /tmp/agy-acp.sh \
  && ! grep -q @AGY_REAL@ /usr/local/bin/agy-acp
-# The filter in front of the server that removes the MCP servers
-# (runner/agy-acp, DIL-1006). Its tests run here, so a failed test fails the
+# The filter in front of the server that removes the HTTP and SSE MCP
+# servers (runner/agy-acp, DIL-1006). Its tests run here, so a failed test fails the
 # build.
 COPY agy-acp /usr/local/lib/agy-acp
 RUN cd /usr/local/lib/agy-acp \
