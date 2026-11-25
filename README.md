@@ -144,6 +144,26 @@ The runner itself:
     502. A missing `settings.json` or token file would make the server wait
     for a browser sign-in until the run times out. `agy-acp` writes both
     before every start to prevent that.
+  - Gemini agents do not get Paperclip's MCP tools: the project tools
+    ("Paperclip projects", on each run on an issue) and the agent's tool
+    connections ("paperclip-assigned"). `agy-acp` starts the server through
+    `runner/agy-acp/mcp-filter.mjs`, which removes every HTTP and SSE MCP
+    server from the session requests (DIL-1006). Stdio servers stay;
+    Paperclip sends none. The reasons:
+    - agy 1.4.3 accepts only MCP server names that match
+      `^[a-zA-Z0-9_-]+$`. It rejects "Paperclip projects" in `session/new`
+      with "Invalid params", so every run on an issue failed.
+    - The servers are on the Paperclip server, port 3100, which
+      `agent-runner-egress` blocks for the runner. With a valid name, agy
+      ends the first prompt at once with "The MCP server ... failed to
+      initialize".
+  - What Gemini agents still have: the Paperclip API through the run's
+    callback bridge. Paperclip sets `PAPERCLIP_API_URL` to the bridge in the
+    sandbox and `PAPERCLIP_API_KEY` to the bridge token, and the prompt tells
+    the agent to use curl. A live run on an issue posted a comment and set
+    the issue to done this way. agy's own tools, the shell included, are not
+    changed. The filter logs the names of the servers that it removes to
+    stderr, never their URLs or headers.
 - pi runs through a slot cap (`/usr/local/bin/pi`, `runner/pi-slot.sh`): at
   most N pi processes at once on the runner, N from `max-concurrent` in the
   pi mount (`/etc/paperclip-runner/pi/`), 1 to 16, default 2. The pi agents

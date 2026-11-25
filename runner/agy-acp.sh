@@ -82,7 +82,8 @@ export GEMINI_HOME AGY_ACP_FORCE_FILE_STORAGE HTTPS_PROXY https_proxy NO_PROXY \
 # --uid= is the argument list that Paperclip pins for the linux builds
 # (antigravity-distributions.json). Google does not document it; keep it
 # with the pin.
-# mcp-filter.mjs starts the server and removes the MCP servers from the
-# session requests. Paperclip sends its own servers on each run on an issue;
-# the runner cannot reach them, and agy stops without them (DIL-1006).
+# mcp-filter.mjs starts the server and removes the HTTP and SSE MCP servers
+# from the session requests. Paperclip sends its own servers on each run on
+# an issue; the runner cannot reach them, and agy stops without them
+# (DIL-1006).
 exec /usr/local/bin/node /usr/local/lib/agy-acp/mcp-filter.mjs "$real" --uid= "$@"
