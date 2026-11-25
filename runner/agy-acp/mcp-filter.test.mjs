@@ -14,16 +14,35 @@ const request = (method, mcpServers) =>
   JSON.stringify({ jsonrpc: "2.0", id: 2, method, params: { cwd: "/w", mcpServers } });
 
 // Starts the filter in front of a stand-in server written in JavaScript.
+// result.exit resolves on "close", not on "exit": "close" comes only after
+// the filter has exited and its stdout and stderr have ended, so result.out
+// and result.err are complete.
 function startFilter(serverScript) {
   const child = spawn(process.execPath, [filter, process.execPath, "-e", serverScript]);
   const result = { out: "", err: "" };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk) => { result.out += chunk; });
   child.stderr.on("data", (chunk) => { result.err += chunk; });
-  result.exit = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+  result.exit = new Promise((resolve) => child.on("close", (code, signal) => resolve({ code, signal })));
   return { child, result };
 }
+// Resolves when the stand-in server has printed the line `ready`.
+function ready(child, result) {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!result.out.includes("ready\n")) return;
+      child.stdout.off("data", check);
+      resolve();
+    };
+    child.stdout.on("data", check);
+    check();
+  });
+}
 // A stand-in server: prints each line that it reads, then exits with 3.
-const ECHO = "process.stdin.pipe(process.stdout); process.stdin.on('end', () => process.exit(3));";
+// exitCode instead of exit(): the process ends only after stdout is
+// written out.
+const ECHO = "process.stdin.pipe(process.stdout); process.exitCode = 3;";
 
 test("session/new: HTTP and SSE servers go, the other params stay", () => {
   const { line, removed } = filterLine(
@@ -90,9 +109,11 @@ test("a last line without a newline reaches the server", async () => {
 
 test("SIGTERM reaches the server", async () => {
   const { child, result } = startFilter(
-    "process.stdout.write('ready\\n'); process.on('SIGTERM', () => { process.stdout.write('got SIGTERM\\n'); process.exit(0); }); setInterval(() => {}, 1000);",
+    // The handler first, then `ready`: the test sends the signal only after
+    // `ready`, so the handler is in place.
+    "process.on('SIGTERM', () => { process.stdout.write('got SIGTERM\\n'); process.exitCode = 0; clearInterval(t); }); const t = setInterval(() => {}, 1000); process.stdout.write('ready\\n');",
   );
-  await new Promise((resolve) => child.stdout.once("data", resolve));
+  await ready(child, result);
   child.kill("SIGTERM");
   // The stand-in server handles the signal and exits 0, so the filter exits 0.
   assert.deepEqual(await result.exit, { code: 0, signal: null });
@@ -100,8 +121,8 @@ test("SIGTERM reaches the server", async () => {
 });
 
 test("a server killed by a signal ends the filter by that signal", async () => {
-  const { child, result } = startFilter("process.stdout.write('ready\\n'); setInterval(() => {}, 1000);");
-  await new Promise((resolve) => child.stdout.once("data", resolve));
+  const { child, result } = startFilter("setInterval(() => {}, 1000); process.stdout.write('ready\\n');");
+  await ready(child, result);
   child.kill("SIGTERM");
   assert.deepEqual(await result.exit, { code: null, signal: "SIGTERM" });
 });
@@ -111,14 +132,14 @@ test("a server that cannot start gives exit code 69", async () => {
   let err = "";
   child.stderr.on("data", (chunk) => { err += chunk; });
   child.stdin.end();
-  const code = await new Promise((resolve) => child.on("exit", resolve));
+  const code = await new Promise((resolve) => child.on("close", resolve));
   assert.equal(code, 69);
   assert.match(err, /cannot start \/nonexistent\/agy-acp-server/);
 });
 
 test("no server argument gives exit code 64", async () => {
   const child = spawn(process.execPath, [filter]);
-  const code = await new Promise((resolve) => child.on("exit", resolve));
+  const code = await new Promise((resolve) => child.on("close", resolve));
   assert.equal(code, 64);
 });
 

@@ -74,7 +74,15 @@ export function main([server, ...args]) {
     process.stderr.write("usage: mcp-filter.mjs <server> [argument ...]\n");
     process.exit(64);
   }
-  const child = spawn(server, args, { stdio: ["pipe", "inherit", "inherit"] });
+  // Install the signal handlers before the server starts. A signal that
+  // came between the start and the handlers would end this process with
+  // the default action and leave the server running. A handler runs only
+  // on the event loop, so child is set when it runs.
+  let child;
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => child.kill(signal));
+  }
+  child = spawn(server, args, { stdio: ["pipe", "inherit", "inherit"] });
   child.on("error", (err) => {
     process.stderr.write(`agy-acp: cannot start ${server}: ${err.message}\n`);
     process.exit(69);
@@ -97,9 +105,6 @@ export function main([server, ...args]) {
     }
   });
   input.on("close", () => child.stdin.end());
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-    process.on(signal, () => child.kill(signal));
-  }
   child.on("exit", (code, signal) => {
     if (signal) {
       process.removeAllListeners(signal);
