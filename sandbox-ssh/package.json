@@ -7,7 +7,7 @@
   "license": "MIT",
   "author": "ryanjdillon",
   "repository": "github:ryanjdillon/paperclip-image",
-  "packageManager": "pnpm@12.9.0",
+  "packageManager": "pnpm@12.22.0",
   "engines": {
     "node": ">=24.11.0"
   },
