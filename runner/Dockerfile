@@ -45,7 +45,7 @@ FROM ghcr.io/paperclipai/paperclip:2026.1117.0@sha256:bdf38d10544dc6c831e16dc027
 # Debian 13: Paperclip's own runner needs glibc 2.39 or newer on the
 # execution host (PAPERCLIP_RUNNER_MINIMUM_GLIBC_VERSION in
 # packages/shared/src/agent-runner.ts). Debian 12 has 2.36.
-FROM node:24-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0
+FROM node:26-trixie-slim@sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5
 
 # ripgrep and fd (Debian's fdfind, which pi also looks for): for agent CLIs
 # that want system rg/fd (pi's grep and find tools; Claude Code bundles its own
