@@ -15,9 +15,13 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR cancels the older run of that PR. A main run that has
+# started is not cancelled. Main runs run one at a time, so an older build
+# cannot push its image tags after a newer build. A newer main run replaces
+# a main run that waits in the queue.
 concurrency:
-  group: runner-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   image:
