@@ -56,7 +56,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: ryanjdillon/workflows/.github/workflows/docker-build-push.yml@f7aa26b3ffb54bb032d2710a44296ec3b82a3f7e # v1.0.0
+    uses: ryanjdillon/workflows/.github/workflows/docker-build-push.yml@ebb73dbf81f54d7bf8ddb23e5b8e0783e7926acd # v1.2.2
     with:
       image: ryanjdillon/paperclip-sandbox-ssh
       context: sandbox-ssh
