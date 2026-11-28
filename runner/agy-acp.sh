@@ -36,10 +36,12 @@ token_tmp="$state/.acp_token.json.$$"
 settings_tmp="$state/.settings.json.$$"
 bundle="$GEMINI_HOME/ca-bundle.crt"
 bundle_tmp="$bundle.$$"
+skills="$GEMINI_HOME/config/skills"
+skills_tmp="$skills.$$"
 # A signal must run the EXIT trap, which removes the temporary files. sh
 # runs the EXIT trap on `exit`, but not when a signal kills it.
 trap 'exit 130' INT TERM HUP
-trap 'rm -f "$token_tmp" "$settings_tmp" "$bundle_tmp"' EXIT
+trap 'rm -f "$token_tmp" "$settings_tmp" "$bundle_tmp" "$skills_tmp"' EXIT
 
 # Rewritten before every start, so that the server starts from known files:
 # a missing or changed token file or setting makes the server wait for a
@@ -55,6 +57,27 @@ printf '{"auth":{"type":"oauth-personal"}}\n' >"$settings_tmp"
 mv -f "$settings_tmp" "$state/settings.json"
 cat /etc/ssl/certs/ca-certificates.crt "$ca" >"$bundle_tmp"
 mv -f "$bundle_tmp" "$bundle"
+# Skills. Paperclip copies the agent's skills to $HOME/.gemini/skills for
+# each run, the Gemini CLI's path. agy 1.4.3 does not read that path. It
+# reads $GEMINI_HOME/config/skills and $GEMINI_HOME/antigravity-cli/skills,
+# and .gemini/skills and .agents/skills under the session's cwd
+# (acp_server/server.py resolve_skills_paths, acp_server/paths.py). So
+# config/skills becomes a link to this run's directory. Without that
+# directory the link goes, so a run never sees the skills of an older run.
+# GEMINI_HOME is shared: with two agy runs at once, the last start wins.
+# A real directory at config/skills is left alone.
+mkdir -p "$GEMINI_HOME/config"
+if [ -e "$skills" ] && [ ! -L "$skills" ]; then
+  echo "agy-acp: $skills is not a link; leaving it" >&2
+elif case ${HOME:-} in /*) true ;; *) false ;; esac \
+  && [ -d "$HOME/.gemini/skills" ]; then
+  # A link that a killed start left behind would make ln fail.
+  rm -f "$skills_tmp"
+  ln -s "$HOME/.gemini/skills" "$skills_tmp"
+  mv -Tf "$skills_tmp" "$skills"
+else
+  rm -f "$skills"
+fi
 trap - EXIT
 
 AGY_ACP_FORCE_FILE_STORAGE=1
