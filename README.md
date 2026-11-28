@@ -110,6 +110,16 @@ The runner itself:
     Before every start, it writes the broker's dummy credentials and
     `{"auth": {"type": "oauth-personal"}}` to `$GEMINI_HOME/antigravity-acp/`.
     Then it sends the server's traffic through the broker.
+  - Skills (DIL-963). Paperclip copies an agent's skills to
+    `$HOME/.gemini/skills` for each run. agy 1.4.3 does not read that path.
+    It reads `$GEMINI_HOME/config/skills`, `$GEMINI_HOME/antigravity-cli/skills`,
+    and `.gemini/skills` and `.agents/skills` under the session's cwd
+    (`resolve_skills_paths` in the server's `acp_server/server.py`). Before
+    every start, `agy-acp` points `$GEMINI_HOME/config/skills` at the run's
+    `$HOME/.gemini/skills`. Without that directory it removes the link, so a
+    run never sees an older run's skills. A real directory at that path is
+    left alone. `GEMINI_HOME` is shared, so with two agy runs at once the
+    last start wins. Today there is one Gemini agent with one run at a time.
   - The broker terminates TLS for `oauth2.googleapis.com` and the two
     `cloudcode-pa` hosts only. It swaps the dummy token for the real one on
     `v1internal` calls and refuses all other requests to those hosts. It does

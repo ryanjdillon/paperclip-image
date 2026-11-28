@@ -169,11 +169,16 @@ RUN dir="/opt/antigravity/${AGY_ACP_VERSION}" \
  && ! grep -q @AGY_REAL@ /usr/local/bin/agy-acp
 # The filter in front of the server that removes the HTTP and SSE MCP
 # servers (runner/agy-acp, DIL-1006). Its tests run here, so a failed test fails the
-# build.
+# build. skills.test.sh tests the wrapper's skills link (DIL-963) on a copy
+# of the installed wrapper, through the filter, with a stub server that
+# prints where the link points.
 COPY agy-acp /usr/local/lib/agy-acp
 RUN cd /usr/local/lib/agy-acp \
  && node --test mcp-filter.test.mjs \
- && rm mcp-filter.test.mjs \
+ && printf '#!/bin/sh\nl="$GEMINI_HOME/config/skills"\nif [ -L "$l" ]; then readlink "$l"; elif [ -d "$l" ]; then echo dir; else echo none; fi\n' >/tmp/agy-stub \
+ && chmod 755 /tmp/agy-stub \
+ && sh skills.test.sh /usr/local/bin/agy-acp /tmp/agy-stub \
+ && rm -f mcp-filter.test.mjs skills.test.sh /tmp/agy-stub \
  && chmod -R go-w,a+rX /usr/local/lib/agy-acp
 # The token broker for agy-acp (runner/agy-broker), run in its own pod from
 # this image. Its tests run here: CI only builds this image, so a failed test fails
