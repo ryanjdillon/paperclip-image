@@ -303,7 +303,98 @@ The runner itself:
   HTTPS only): `/etc/ssh/ssh_config.d/github.conf` uses a deploy key mounted
   at `/run/secrets/git/skrap/key` and GitHub's host keys pinned in
   `/etc/ssh/github_known_hosts`. Commits are made as "dillonteknisk agents"
-  (`/etc/gitconfig`).
+  (`/etc/gitconfig`). This stays until the deploy key is retired
+  (DIL-1047, after gh-broker works).
+- GitHub credentials (`runner/gh-broker`, DIL-1047). A GitHub App's
+  installation token gives git and `gh` access over HTTPS to a fixed list of
+  repositories.
+  - Run the broker from this image as a sidecar in the runner pod, as its
+    own UID (not 20100), with
+    `node /usr/local/lib/gh-broker/gh-broker.mjs`. Only this container
+    mounts the App's Secret, at `/run/secrets/github-app/` (files `app-id`,
+    `installation-id`, `private-key`). It listens on `127.0.0.1:3100`
+    (`GH_BROKER_HOST`, `GH_BROKER_PORT`).
+  - `GH_BROKER_REPOSITORIES`: a comma list of repository names, without the
+    owner (for example `skrap,dillonteknisk-docs`). Each token is limited to
+    these repositories and to the permissions `contents: write`,
+    `pull_requests: write` and `metadata: read`. An invalid name, or an
+    empty list, gives no token. The broker refuses a token that GitHub
+    grants for more repositories or permissions.
+  - The broker keeps a token until 5 minutes before it expires (GitHub
+    gives one hour). After a failed mint it waits 10 s before it tries
+    again. Its calls to GitHub time out after 8 s, so a run gets a reason
+    before Paperclip's launcher gives up (10 s).
+  - Git author: the App's bot user, `<slug>[bot]` with
+    `<id>+<slug>[bot]@users.noreply.github.com`. The broker asks GitHub for
+    it once. `GH_BROKER_GIT_NAME` and `GH_BROKER_GIT_EMAIL` (both) set
+    another identity. With `GH_BROKER_AUTHOR_FILE`, the broker writes the
+    identity as a git config include. `/etc/gitconfig` includes
+    `/run/gh-broker/author.gitconfig`, so mount an emptyDir there,
+    writable in the broker and read-only in the runner. Without the file,
+    commits keep the name "dillonteknisk agents".
+  - The broker calls `api.github.com` through `HTTPS_PROXY`, with
+    `NODE_USE_ENV_PROXY=1`. Set both in its container.
+  - Managed runs (sandbox runs, and any run that Paperclip does not run in
+    host mode). Paperclip 2026.1117.0 stages a `git` and a `gh` launcher
+    for each run. They POST to
+    `<PAPERCLIP_GITHUB_BROKER_URL>/runtime-tools/github/credentials`, which
+    is the server's `PAPERCLIP_API_URL`
+    (`http://paperclip.paperclip.svc.cluster.local:3100`)
+    (`packages/adapter-utils/src/github-launcher.ts:100-150`). The pod maps
+    that name to `127.0.0.1` (`hostAliases`), so the request comes to the
+    broker. The broker answers in the form of Paperclip's own broker:
+    `status: "available"` and an `env` with `GH_TOKEN`, `GITHUB_TOKEN`,
+    `PAPERCLIP_GIT_TOKEN`, the author variables and `GIT_CONFIG_*`. The
+    config clears other credential helpers, adds Paperclip's own helper for
+    `https://github.com` (it reads the token from `PAPERCLIP_GIT_TOKEN`),
+    and rewrites `git@github.com:` and `ssh://git@github.com/` remotes to
+    `https://github.com/`. A fault gives `status: "unavailable"` with a
+    reason, which the launcher prints.
+  - Host-mode runs (Legacy SSH runs with no Paperclip GitHub connection).
+    Paperclip uses the runner's own config there
+    (`server/src/services/heartbeat/execution-configuration.ts:178-183`).
+    `/etc/gitconfig` sets `/usr/local/bin/gh-broker-client` as the
+    credential helper for `https://github.com`. `/usr/local/bin/gh` is a
+    wrapper in front of Debian's `/usr/bin/gh`: without `GH_TOKEN` or
+    `GITHUB_TOKEN`, it gets a token with `gh-broker-client token` and gives
+    it to gh in `GH_TOKEN`. `GH_BROKER_URL` overrides the broker for both
+    (default `http://127.0.0.1:3100`). skrap still goes over SSH with the
+    deploy key, because its `insteadOf` comes first.
+  - The broker answers `POST /runtime-tools/github/credentials` and
+    `GET /healthz` only. Everything else gets 404. It never forwards a
+    request to the Paperclip server, so the alias opens no path to it. It
+    refuses a request with `Origin`, `Cookie` or `Sec-Fetch-Site` (403), as
+    Paperclip does, and a body over 64 KiB (413).
+  - Requests to the server's name carry the run JWT in `Authorization` and
+    a capability token. The broker logs only the method, the path without
+    the query, and the result. It never logs a header value, a query, a
+    body or a token.
+  - The broker does not check the run JWT or the capability: it has no key
+    for them. **Every process in the runner pod can get a token**, from
+    every run, at every trust level. This skips Paperclip's trust gate,
+    which gives no GitHub credential to low-trust runs
+    (`server/src/services/github-operation-credentials.ts:31-110`). A run
+    can also read another live run's token from `/proc` (same UID).
+  - If a run binds `127.0.0.1:3100` while the broker restarts, the run gets
+    the requests, with their run JWTs, and can answer them. A run can read
+    those JWTs from `/proc` anyway. The broker does not exit when the port
+    is taken: it tries again every second, and logs it once. An exit would
+    restart the sidecar in a loop and make the runner pod NotReady, and SSH
+    would stop for every agent. For the same reason the broker starts and
+    answers "unavailable" when the Secret or the repository list is wrong.
+    Agents cannot run their own server on port 3100 in the runner.
+  - Not covered: a `paperclip_runner` (native) agent in a sandbox without a
+    Paperclip GitHub connection. Paperclip gives its launchers no broker
+    URL (`server/src/services/heartbeat-github-launchers.ts:35-46`), so it
+    gets no token.
+  - The build tests the broker (`runner/gh-broker/gh-broker.test.mjs`):
+    token minting with a key made for the test, caching, one mint at a
+    time, repository and permission scope, 404s, no secret in the log, the
+    credential helper through real git, the gh wrapper with a stub gh, and
+    Paperclip's own git launcher, from the server image of the pinned
+    release, against the broker. Locally:
+    `PAPERCLIP_LAUNCHER_MODULE=<paperclip>/packages/adapter-utils/src/github-launcher.ts node --test runner/gh-broker/gh-broker.test.mjs`
+    (Node 24; without the variable, that one test is skipped).
 - Egress proxy (DIL-888): `/etc/profile.d` sets these variables.
   - `https_proxy` and `HTTPS_PROXY` point to the cluster's CONNECT proxy,
     `agent-egress.paperclip-agents.svc.cluster.local:3128`.
@@ -318,7 +409,7 @@ The runner itself:
   NetworkPolicy is. `agy-acp` points agy and its child processes at the
   agy-broker instead. The broker sends every host other than agy's Google
   hosts on to this proxy (DIL-993).
-- Base tools: git, curl, jq, python3 (with venv), make, unzip, less, file,
+- Base tools: git, gh, curl, jq, python3 (with venv), make, unzip, less, file,
   xz, ripgrep and fd. Anything more comes from the repository's own flake.
 - Nix (single-user, static binary at `/usr/local/bin/nix`, flakes on): mount
   a volume at `/nix` owned by UID 20100 (the same initContainer can chown it).

@@ -52,13 +52,16 @@ FROM node:24-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3
 # rg); without them some try to download one at run time, which fails behind
 # restricted egress. The rest is the base toolset agents expect (DIL-889); the
 # image is not the security boundary (node alone can do what these do).
-# xz-utils: Nix unpacks .tar.xz sources and NARs.
+# xz-utils: Nix unpacks .tar.xz sources and NARs. gh: GitHub's CLI, for
+# `gh pr create` with a gh-broker token (DIL-1047). Debian's build is older
+# than GitHub's own, and needs no extra apt source.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       fd-find \
       file \
+      gh \
       git \
       jq \
       less \
@@ -188,6 +191,29 @@ RUN cd /usr/local/lib/agy-broker \
  && node --test agy-broker.test.mjs \
  && rm agy-broker.test.mjs \
  && chmod -R go-w,a+rX /usr/local/lib/agy-broker
+# The GitHub credential broker (runner/gh-broker, DIL-1047), run from this
+# image as a sidecar in the runner pod, and its two host-mode clients: the
+# git credential helper (gh-broker-client, in /etc/gitconfig) and the gh
+# wrapper (/usr/local/bin/gh, in front of Debian's /usr/bin/gh). The tests
+# run here, so a failed test fails the build. The launcher contract test
+# runs Paperclip's own git launcher, from the server image of the pinned
+# release (the `paperclip` stage), against the broker.
+COPY gh-broker /usr/local/lib/gh-broker
+COPY --from=paperclip /app/packages/adapter-utils/src/github-launcher.ts /tmp/gh-broker-test/github-launcher.ts
+RUN cd /usr/local/lib/gh-broker \
+ && PAPERCLIP_LAUNCHER_MODULE=/tmp/gh-broker-test/github-launcher.ts node --test gh-broker.test.mjs \
+ && rm -rf gh-broker.test.mjs /tmp/gh-broker-test \
+ && test -x /usr/bin/gh \
+ && sed -e "s|@GH_REAL@|/usr/bin/gh|" -e "s|@GH_BROKER_CLIENT@|/usr/local/bin/gh-broker-client|" gh.sh >/usr/local/bin/gh \
+ && rm gh.sh \
+ && chmod 755 /usr/local/bin/gh \
+ && ! grep -q '@GH_' /usr/local/bin/gh \
+ && sh -n /usr/local/bin/gh \
+ && chmod -R go-w,a+rX /usr/local/lib/gh-broker \
+ && chmod 755 gh-broker-client.mjs \
+ && ln -s /usr/local/lib/gh-broker/gh-broker-client.mjs /usr/local/bin/gh-broker-client \
+ && { GH_BROKER_URL=http://127.0.0.1:1 /usr/local/bin/gh-broker-client token 2>/dev/null; [ $? -eq 1 ]; } \
+ && GH_TOKEN=unused /usr/local/bin/gh --version | grep -q '^gh version '
 
 # The provider pack (about 2.7 GB) and the daemon, root-owned and not writable
 # by the agent user. Only then does the daemon report the pack as protected
@@ -290,6 +316,11 @@ COPY ssh_config_github.conf /etc/ssh/ssh_config.d/github.conf
 COPY --chmod=755 ssh-proxy-connect.sh /usr/local/bin/ssh-proxy-connect
 COPY github_known_hosts /etc/ssh/github_known_hosts
 COPY gitconfig /etc/gitconfig
+# The credential helper for https://github.com is gh-broker-client, after an
+# empty helper, and the author include points at the broker's file.
+RUN [ "$(git config --system --get-all credential.https://github.com.helper | tr '\n' ,)" = ",/usr/local/bin/gh-broker-client," ] \
+ && [ "$(git config --system --get include.path)" = /run/gh-broker/author.gitconfig ] \
+ && [ "$(git config --system --get user.name)" = "dillonteknisk agents" ]
 # ssh-proxy-connect, with a stub netcat that prints its arguments: direct
 # without a proxy, a CONNECT tunnel with https_proxy and with HTTPS_PROXY
 # only, and for a proxy URL with credentials exit code 64 without running
