@@ -350,8 +350,9 @@ The runner itself:
     and rewrites `git@github.com:` and `ssh://git@github.com/` remotes to
     `https://github.com/`. A fault gives `status: "unavailable"` with a
     reason, which the launcher prints.
-  - Host-mode runs (Legacy SSH runs with no Paperclip GitHub connection).
-    Paperclip uses the runner's own config there
+  - Host-mode runs (Legacy SSH runs with no Paperclip GitHub connection
+    and trust preset `standard`; a low-trust Legacy run is managed and uses
+    the launchers). Paperclip uses the runner's own config there
     (`server/src/services/heartbeat/execution-configuration.ts:178-183`).
     `/etc/gitconfig` sets `/usr/local/bin/gh-broker-client` as the
     credential helper for `https://github.com`. `/usr/local/bin/gh` is a
@@ -359,7 +360,10 @@ The runner itself:
     `GITHUB_TOKEN`, it gets a token with `gh-broker-client token` and gives
     it to gh in `GH_TOKEN`. `GH_BROKER_URL` overrides the broker for both
     (default `http://127.0.0.1:3100`). skrap still goes over SSH with the
-    deploy key, because its `insteadOf` comes first.
+    deploy key: its `insteadOf` rewrites the URL to SSH, so git never asks
+    the https helper. The rewrite is a prefix match, so it also catches
+    any `https://github.com/ryanjdillon/skrap*` URL (for example
+    `skrap-mirror`).
   - The broker answers `POST /runtime-tools/github/credentials` and
     `GET /healthz` only. Everything else gets 404. It never forwards a
     request to the Paperclip server, so the alias opens no path to it. It
@@ -383,10 +387,11 @@ The runner itself:
     would stop for every agent. For the same reason the broker starts and
     answers "unavailable" when the Secret or the repository list is wrong.
     Agents cannot run their own server on port 3100 in the runner.
-  - Not covered: a `paperclip_runner` (native) agent in a sandbox without a
-    Paperclip GitHub connection. Paperclip gives its launchers no broker
-    URL (`server/src/services/heartbeat-github-launchers.ts:35-46`), so it
-    gets no token.
+  - A `paperclip_runner` (native) agent in a sandbox without a Paperclip
+    GitHub connection: Paperclip gives its launchers no broker URL
+    (`server/src/services/heartbeat-github-launchers.ts:18-46`), so its git
+    gets no token. Its `gh` still gets one: the launcher passes an empty
+    `GH_TOKEN`, and the gh wrapper then asks the broker itself.
   - The build tests the broker (`runner/gh-broker/gh-broker.test.mjs`):
     token minting with a key made for the test, caching, one mint at a
     time, repository and permission scope, 404s, no secret in the log, the

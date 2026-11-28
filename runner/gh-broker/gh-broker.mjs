@@ -158,7 +158,10 @@ export function createTokenSource({
     }
     // GitHub limits the token to the requested list. Check it anyway: a
     // token for any other repository is never handed out.
-    const granted = Array.isArray(body.repositories) ? body.repositories.map((r) => r?.name) : [];
+    if (!Array.isArray(body.repositories) || !body.repositories.length) {
+      throw new BrokerError("token mint: GitHub's answer does not list the repositories");
+    }
+    const granted = body.repositories.map((r) => r?.name);
     const extra = granted.filter((name) => !repositories.includes(name));
     if (extra.length) throw new BrokerError(`token mint: GitHub granted repositories outside the list (${extra.length})`);
     const permissions = body.permissions ?? {};
@@ -397,14 +400,22 @@ export function listenWithRetry(server, port, host, { retryMs = 1000, logger = d
   return new Promise((resolve) => {
     let warned = false;
     const attempt = () => {
+      // Any listen error (a taken port, or a bad GH_BROKER_HOST or
+      // GH_BROKER_PORT) is logged once and tried again, never thrown.
       const onError = (error) => {
-        if (error.code !== "EADDRINUSE") throw error;
-        if (!warned) { warned = true; logger(`${host}:${port} is taken by another process; trying again every ${retryMs} ms`); }
+        if (!warned) {
+          warned = true;
+          logger(error.code === "EADDRINUSE"
+            ? `${host}:${port} is taken by another process; trying again every ${retryMs} ms`
+            : `cannot listen on ${host}:${port} (${error.code ?? "error"}); trying again every ${retryMs} ms`);
+        }
         setTimeout(attempt, retryMs).unref?.();
       };
       server.once("error", onError);
       server.listen(port, host, () => {
         server.off("error", onError);
+        // A later server error is logged; it must not stop the broker.
+        server.on("error", (error) => logger(`server error: ${error.code ?? "error"}`));
         logger(`listening on ${host}:${port}`);
         resolve(server);
       });

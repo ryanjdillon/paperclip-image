@@ -167,9 +167,11 @@ test("token source: refuses a token for other repositories or more permissions",
     { repositories: [{ name: "skrap" }, { name: "secret-repo" }] },
     { permissions: { contents: "write", administration: "write" } },
     { permissions: { metadata: "write" } },
+    { repositories: undefined },
+    { repositories: [] },
   ]) {
     const { impl } = fakeGitHub({
-      mint: () => json(201, { token: MINTED, expires_at: new Date(Date.now() + 3_600_000).toISOString(), ...extra }),
+      mint: () => json(201, { token: MINTED, expires_at: new Date(Date.now() + 3_600_000).toISOString(), repositories: [{ name: "skrap" }], ...extra }),
     });
     const token = createTokenSource({ readConfig: () => APP, repositories: REPOS, fetchImpl: impl, logger: () => {} });
     await assert.rejects(token(), (e) => e instanceof BrokerError && !e.message.includes(MINTED), JSON.stringify(extra));
@@ -346,6 +348,16 @@ test("broker: no token, header value, query or key in any log line", async () =>
       assert.ok(!text.includes(secret), `log carries ${secret}`);
     }
   } finally { b.server.close(); }
+});
+
+test("listenWithRetry: a bad address is logged and tried again, not thrown", async () => {
+  const logs = [];
+  const server = http.createServer();
+  listenWithRetry(server, 0, "192.0.2.1", { retryMs: 20, logger: (m) => logs.push(m) });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.ok(logs.some((l) => l.includes("cannot listen on 192.0.2.1")), logs.join("\n"));
+  assert.equal(logs.filter((l) => l.includes("cannot listen")).length, 1);
+  server.close();
 });
 
 test("listenWithRetry: waits for a taken port instead of exiting", async () => {
