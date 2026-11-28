@@ -3,15 +3,28 @@
 [user]
 	name = dillonteknisk agents
 	email = agents@dillonteknisk.no
+# The GitHub App's bot user, when gh-broker has found it (DIL-1047). The
+# broker writes this file in an emptyDir that the runner mounts read-only. git
+# ignores a missing include, so without the broker the name above applies.
+[include]
+	path = /run/gh-broker/author.gitconfig
 [init]
 	defaultBranch = main
 [push]
 	autoSetupRemote = true
 # skrap is cloned, fetched and pushed as https://github.com/ryanjdillon/skrap
-# (the runner has no https credentials) and git uses SSH with the deploy key.
+# and git uses SSH with the deploy key, until the deploy key is retired
+# (DIL-1047): gh-broker-client below answers for other https GitHub URLs.
 # Agents see only the https form: pi's redactor rewrites `git@github.com` as
-# an email address. insteadOf is a prefix match, so it covers skrap and
-# skrap.git only; other https GitHub URLs are untouched (and the deploy key
-# reaches no other repo anyway).
+# an email address. insteadOf is a prefix match, so it covers skrap,
+# skrap.git and any other ryanjdillon/skrap* URL (such as skrap-mirror, which
+# the deploy key cannot reach); other https GitHub URLs are untouched.
 [url "git@github.com:ryanjdillon/skrap"]
 	insteadOf = https://github.com/ryanjdillon/skrap
+# https://github.com: a token from gh-broker (DIL-1047), for host-mode runs
+# (Legacy SSH runs; managed runs get git config from Paperclip's launcher and
+# never read this file). The empty helper clears any helper set before it.
+# skrap's insteadOf above still sends skrap over SSH with the deploy key.
+[credential "https://github.com"]
+	helper =
+	helper = /usr/local/bin/gh-broker-client
