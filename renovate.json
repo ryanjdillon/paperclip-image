@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "github>ryanjdillon/workflows//renovate/default#v1"
+    "github>ryanjdillon/workflows//renovate/default#v1.4.0"
   ],
   "customManagers": [
     {
