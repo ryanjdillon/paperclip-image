@@ -77,7 +77,7 @@ RUN apt-get update \
 # Installed as root: the global modules stay root-owned and, on a read-only
 # root filesystem, immutable to the agent user.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.323
+ARG CLAUDE_CODE_VERSION=2.1.330
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force \
  && claude --version \
